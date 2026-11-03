@@ -52,6 +52,8 @@ button{font:600 14px var(--f-body);border:0;border-radius:10px;padding:0 12px;cu
 #list .s{font-size:13px;color:var(--muted)}
 .tag{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:4px;color:#fff}
 .tag.ef{background:var(--ef);color:#12305a}.tag.t2{background:var(--t2)}.tag.free{background:var(--ok)}
+.leaflet-tile-container img.leaflet-tile{width:256.6px!important;height:256.6px!important}
+#map .leaflet-tile{outline:1px solid transparent}
 .leaflet-popup-content{font:14px/1.4 var(--f-body);margin:12px 14px}
 .leaflet-popup-content b{font-size:15px}
 .pop-tags{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
@@ -83,10 +85,11 @@ button:focus-visible,#q:focus-visible{outline:3px solid var(--ef);outline-offset
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-// Source principale : Base nationale IRVE (data.gouv.fr, API tabulaire). Secours : OpenStreetMap (Overpass).
-const IRVE_RID = "eb76d20a-8501-400e-b336-d85724de5435";
-const IRVE_API = "https://tabular-api.data.gouv.fr/api/resources/" + IRVE_RID + "/data/";
-const OVERPASS = "https://overpass-api.de/api/interpreter";
+// Source principale : Base nationale IRVE (data.gouv.fr). L'identifiant du fichier change à chaque mise à jour :
+// on le retrouve automatiquement via l'API du jeu de données. Secours : OpenStreetMap (Overpass, plusieurs serveurs).
+const DATASET_API = "https://www.data.gouv.fr/api/1/datasets/5448d3e0c751df01f85d0572/";
+const TABULAR = id => "https://tabular-api.data.gouv.fr/api/resources/" + id + "/data/";
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
 const MIN_ZOOM = 11;
 
 const $ = id => document.getElementById(id);
@@ -100,7 +103,7 @@ const start = JSON.parse(store.get("view") || "null") || {lat:46.6705, lng:-1.42
 const map = L.map("map", {zoomControl:false, attributionControl:true}).setView([start.lat, start.lng], start.z);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(map);
 const layer = L.layerGroup().addTo(map);
-let me = null, stations = [], reqId = 0;
+let me = null, stations = [], reqId = 0, lastErr = "";
 
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -110,17 +113,35 @@ function dist(a, b){const R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dg=(b.lng-a.ln
 const fmtKm = d => d < 1 ? Math.round(d*1000) + " m" : d.toFixed(d < 10 ? 1 : 0).replace(".", ",") + " km";
 
 // --- IRVE : une ligne = un point de charge, regroupé par station
-async function fetchIRVE(b, col){
-  const p = new URLSearchParams({page_size:"50"});
-  p.set(col + "__exact", "true");
-  p.set("consolidated_latitude__greater", b.getSouth()); p.set("consolidated_latitude__less", b.getNorth());
-  p.set("consolidated_longitude__greater", b.getWest()); p.set("consolidated_longitude__less", b.getEast());
-  let url = IRVE_API + "?" + p, rows = [], pages = 0;
-  while (url && pages < 12){
-    const r = await fetch(url); if (!r.ok) throw new Error("IRVE " + r.status);
-    const j = await r.json(); rows = rows.concat(j.data || []); url = j.links && j.links.next; pages++;
+let irveId = null, irveDead = false;
+async function findIRVE(){
+  if (irveId) return irveId;
+  const r = await fetch(DATASET_API); if (!r.ok) throw new Error("jeu IRVE " + r.status);
+  const res = ((await r.json()).resources || []).filter(x => /csv/i.test(x.format || "") && !/doc/i.test(x.title || ""));
+  res.sort((a, b) => (b.metrics && b.metrics.views || 0) - (a.metrics && a.metrics.views || 0));
+  for (const x of res){
+    try { const t = await fetch(TABULAR(x.id) + "?page_size=1"); if (!t.ok) continue;
+      const j = await t.json(); const row = (j.data || [])[0];
+      if (row && "prise_type_ef" in row && "consolidated_latitude" in row){ irveId = x.id; return irveId; } } catch(e) {}
   }
-  return rows;
+  throw new Error("IRVE introuvable");
+}
+// --- IRVE : une ligne = un point de charge, regroupé par station
+async function fetchIRVE(b, col){
+  const id = await findIRVE();
+  const base = () => { const p = new URLSearchParams({page_size:"50"});
+    p.set("consolidated_latitude__greater", b.getSouth()); p.set("consolidated_latitude__less", b.getNorth());
+    p.set("consolidated_longitude__greater", b.getWest()); p.set("consolidated_longitude__less", b.getEast()); return p; };
+  for (const v of ["true", "True"]){
+    const p = base(); p.set(col + "__exact", v);
+    let url = TABULAR(id) + "?" + p, rows = [], pages = 0, ok = true;
+    while (url && pages < 12){
+      const r = await fetch(url); if (!r.ok){ ok = false; break; }
+      const j = await r.json(); rows = rows.concat(j.data || []); url = j.links && j.links.next; pages++;
+    }
+    if (ok) return rows;
+  }
+  throw new Error("IRVE filtre");
 }
 function fromIRVE(rows){
   const by = new Map();
@@ -139,9 +160,14 @@ function fromIRVE(rows){
 async function fetchOSM(b, t2){
   const bb = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(",");
   const q = `[out:json][timeout:25];(nwr["amenity"="charging_station"]["socket:schuko"](${bb});nwr["amenity"="charging_station"]["socket:typee"](${bb});${t2 ? `nwr["amenity"="charging_station"]["socket:type2"](${bb});` : ""});out center tags;`;
-  const r = await fetch(OVERPASS, {method:"POST", body:"data=" + encodeURIComponent(q), headers:{"Content-Type":"application/x-www-form-urlencoded"}});
-  if (!r.ok) throw new Error("OSM " + r.status);
-  return (await r.json()).elements.map(e => { const t = e.tags || {}, c = e.center || e;
+  let j = null;
+  for (const u of OVERPASS){
+    try { const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 20000);
+      const r = await fetch(u + "?data=" + encodeURIComponent(q), {signal:ctl.signal}); clearTimeout(to);
+      if (r.ok){ j = await r.json(); break; } } catch(e) {}
+  }
+  if (!j) throw new Error("OSM");
+  return j.elements.map(e => { const t = e.tags || {}, c = e.center || e;
     const ef = +(t["socket:schuko"] || t["socket:typee"] || 0) || (t["socket:schuko"] || t["socket:typee"] ? 1 : 0);
     const t2v = +(t["socket:type2"] || 0) || (t["socket:type2"] ? 1 : 0);
     return {lat:c.lat, lng:c.lon, name:t.name || t.operator || "Borne", addr:[t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" "),
@@ -159,8 +185,9 @@ async function load(){
     if (wantT2) rows.push(...await fetchIRVE(b, "prise_type_2"));
     list = fromIRVE(rows);
   } catch(e) {
+    lastErr = e.message;
     try { list = await fetchOSM(b, wantT2); src = "OpenStreetMap"; }
-    catch(e2) { if (id === reqId) render("Impossible de joindre les données. Vérifiez la connexion puis bougez la carte."); return; }
+    catch(e2) { if (id === reqId) render("Impossible de joindre les données (" + lastErr + ", OSM). Bougez la carte pour réessayer."); return; }
   }
   if (id !== reqId) return;
   stations = list.filter(s => s.ef || (wantT2 && s.t2));
