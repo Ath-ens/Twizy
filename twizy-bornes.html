@@ -443,7 +443,31 @@ async function resolvePlace(input, useMe){
   const [p] = await geocode(q, 1); if (!p) throw new Error("Adresse introuvable : " + q);
   return p;
 }
+// Valhalla, profil « deux-roues motorisé » : interdit autoroutes et voies express (routes pour automobiles),
+// vitesse limitée à celle du modèle de Twizy. OSRM ne sert qu'en secours.
+const VALHALLA = ["https://valhalla1.openstreetmap.de/route", "https://valhalla.openstreetmap.de/route"];
+function decode6(str){
+  const out = []; let i = 0, lat = 0, lng = 0;
+  while (i < str.length){
+    for (const k of [0, 1]){ let b, shift = 0, res = 0;
+      do { b = str.charCodeAt(i++) - 63; res |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+      const d = (res & 1) ? ~(res >> 1) : (res >> 1); if (k === 0) lat += d; else lng += d; }
+    out.push({lat:lat / 1e6, lng:lng / 1e6});
+  }
+  return out;
+}
 async function route(a, b){
+  const body = {locations:[{lat:a.lat, lon:a.lng}, {lat:b.lat, lon:b.lng}], costing:"motor_scooter",
+    costing_options:{motor_scooter:{top_speed: cfg.model === "45" ? 45 : 80, use_highways:0, use_primary:0.5, use_hills:0.3}},
+    units:"kilometers", directions_type:"none"};
+  for (const u of VALHALLA){
+    try {
+      const r = await fetch(u + "?json=" + encodeURIComponent(JSON.stringify(body)));
+      if (!r.ok) continue;
+      const t = (await r.json()).trip; if (!t || !t.legs || !t.legs.length) continue;
+      return {pts:t.legs.flatMap(l => decode6(l.shape)), km:t.summary.length, min:t.summary.time / 60, noMotorway:true, twizy:true};
+    } catch(e) {}
+  }
   const coords = a.lng + "," + a.lat + ";" + b.lng + "," + b.lat;
   for (const ex of ["&exclude=motorway", ""]){
     try {
@@ -535,8 +559,8 @@ $("tripForm").onsubmit = async e => {
     if (!directKmOk){ status("Recherche des bornes sur le trajet…");
       cand = await stationsAlong(sp, cfg.detour, (d, n) => status("Bornes sur le trajet… " + Math.round(d / n * 100) + " %")); }
     const res = plan(r.km, cand);
-    const speed = cfg.model === "45" ? 40 : 62;            // vitesse moyenne réaliste
-    const driveMin = Math.max(r.min, r.km / speed * 60);
+    const speed = cfg.model === "45" ? 38 : 55;            // moyenne réaliste (villages, feux, ronds-points)
+    const driveMin = r.twizy ? Math.max(r.min * 1.1, r.km / (speed * 1.25) * 60) : Math.max(r.min, r.km / speed * 60);
     const chargeMin = res.stops.reduce((t, x) => t + x.minutes, 0);
     const efC = css("--ef"), t2C = css("--t2");
     cand.forEach(s => { if (!res.stops.some(x => x.s === s))
@@ -551,7 +575,8 @@ $("tripForm").onsubmit = async e => {
       <div><b>${res.stops.length}</b><span>${res.stops.length > 1 ? "arrêts" : "arrêt"}</span></div>
       <div><b>${fmtH(chargeMin)}</b><span>recharge</span></div>
       <div><b>${fmtH(driveMin + chargeMin)}</b><span>au total</span></div></div>`;
-    if (!r.noMotorway) html += `<div class="alert">Pas d'itinéraire sans autoroute trouvé : vérifiez que le trajet n'emprunte pas de voie interdite à la Twizy.</div>`;
+    if (!r.twizy) html += `<div class="alert">Calcul de secours : l'itinéraire peut emprunter une voie express interdite à la Twizy. Réessayez dans un moment.</div>`;
+    html += `<div class="note" style="margin-top:2px">Conduite ${fmtH(driveMin)} + recharge ${fmtH(chargeMin)}. La recharge est calculée au juste nécessaire pour finir le trajet avec la réserve, plus une marge de 5 %.</div>`;
     if (!res.ok) html += `<div class="alert">Aucune borne compatible atteignable : la batterie atteint la réserve vers le km ${Math.max(0, Math.round(res.failAt))}${res.gapTo ? ` et la borne suivante est au km ${Math.round(res.gapTo)}` : ""}. Augmentez le détour maximum, baissez la réserve ou partez plus chargé.</div>`;
     html += `<ol class="steps"><li><span class="pin">A</span><div><div class="t">${esc(a.label)}</div><div class="m">Départ avec ${cfg.soc} %</div></div></li>`;
     res.stops.forEach((x, i) => {
