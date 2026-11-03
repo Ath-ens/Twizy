@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Bornes Twizy</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Bornes Twizy">
+<meta name="theme-color" content="#12305a">
+<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAAE80lEQVR4Xu2c0W0bQQwF7SAV+D8d5MP1uJKUkALTQRoJggMEQTpJy7sl+cid+Y6dPd7c7Eoy9P7x+fUGsMc3xgKPQA5ADrBDOYBygB3KAZQD7FAOoBxgh3IA5QA7lAMoB9ihHEA5wA7lAMoBdigHUA6wQzmAcoAdygGUA+xQDqAcYIdyAOUAO5QDKAfY+W7/kSb8/f1n/Ep+/Po5/o/b8L7IVzCYVBhhBV06yzFdiEd0FaWhHGFO3NPMklZyJGpxTRtFOsgh4kS/kNSWQ1aLHiGpKkcJLaorUvId0nJmvL2VXHOxclTU4oZCx9VK5WhgRq2E1ChHDy3KJaRAOXTMmLsj6FzXI9Tl0JngXDM2dK5uF91PZcUHN4vtMj3MO49oOdTM8L55ate7oSiH2qQuZrguzPWXH0NODsEZhaF27VpyqE0n/jQgNQEhOaTmsuF91NhFZw4qcuhMRAGRaUjIITILqXcwFWYiIYcg9xuKwt0KJl+OBYc+SPpkkuVIv/5dUs6hgofTTDkwY4TEKWXKAeKkyZH4QDxBZ0O5JmtWOXJkXe1h0hecsoAcOTTRzEYiCXKkPAQv0Tcjfm7RcsRfYSeCpxcthyb62UghVI5g8QepZUbkDEPlgFrEyRGp/Dgj2VBbedh64uQQZMSMlVlaDnhOkBxhJRyndDZi5hkkhxqlzQgjQo4YzVcjYKoRcqhhykbAPZBlOTlMZiyOuxwrP3neeM/WXQ4pyIaJheTADCsLyQFWfOXw3hTHOZYNnfU/wnWFvnKIcMwMWEIOOIbud4LN4kw2zvzsPa5bgAfNyzH37p6hnBmi3wkGIjiWI/1ZWSQbfnN2lCOXRcxwpa0cIvg91gH0lEMnG6XpKYcIpbPR89WKSDaqm9FQDhEzesC24kKDbHQrh0g2epjRSg4RMzrBtjKZNtnoUw6RbHQyo4kcmOEE2wo8pLwcZMMPRzkCblvAfzFC7lHDbwiOckB1Csvh98SYyM2GK4X/wHjuXTmm2tw1qFG4HOANcvyHbOziK8exoZdAZENxnbCvHF0RMcMb5IC+75Cex1rmRbIR8cGbdfTiSJnhPVu2FWBbmYFUNgKIKId3/c4wvjY1M8ZXfpgIOaAoQXIEaO7KgtmIeLXSADUzwggqhyYjPVvWjNByjNwJGCFskkuX4yUrZyO0HIc/Gc9C04ywbETLIUXklIsSva1UuSVkI6cc+n5gxkZ0OaAQOXKkx+PJAsjGhRw5ZF+5YMY1aXIIomlGIplypG8uJUicUqYcWZvL7rg1s5FohsSrldzr38CMXZLLAcpIyJEbD7LxCAk5Ig8fNyJixhNU5Ij0Q5zcjuq+zxE8F8FsBE/gOULl2AibDma8RE4OVz8u5mHGCIpyuPqhSVgvTeh+J9g2L49H3ON3HkZTiw3RclyYPjvMGEddjolbzHTPTqK2nnt0t5VrZm0xItnQ12Lj/ePz6+QTEInI3T1DFTPqybFRVJFCWtQ4kO5SbsoTT06RFNtWbiiRkIoqlzxz7CKrSF0t+shxQcSS6k5cqL2tqIWkjRYNy5F1ImnmROdyxOSkqxDXNNxWBjEdUFZQ4Z515YCXFPjgDbJADngIcgBygB3KAZQD7FAOoBxgh3IA5QA7lAMoB9ihHEA5wA7lAMoBdigHUA6wQzmAcoAdygGUA+xQDqAcYIdyAOUAO5QDKAfY+QdvgH6gaSZhxgAAAABJRU5ErkJggg==">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+/* Carte plein écran + panneau bas façon tableau de bord */
+:root{
+  --night:#12305a; --bg:#f3f5f8; --card:#ffffff; --fg:#172033; --muted:#5d6b80;
+  --line:#dde3ec; --ef:#e89a0c; --t2:#2f7fd6; --ok:#1e8a52;
+  --f-display:"Barlow Condensed","Arial Narrow",sans-serif; --f-body:"Barlow",-apple-system,system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0e1522; --card:#172234; --fg:#e8edf5; --muted:#93a1b6; --line:#26344b; --ef:#f5b82e; --t2:#5aa2f0; --ok:#3fbf7d; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:15px/1.4 var(--f-body);background:var(--bg);color:var(--fg);overflow:hidden;-webkit-tap-highlight-color:transparent}
+#map{position:fixed;inset:0;background:var(--bg)}
+.top{position:fixed;left:0;right:0;top:0;z-index:1000;padding:calc(env(safe-area-inset-top,0px) + 10px) max(12px,env(safe-area-inset-right,0px)) 10px max(12px,env(safe-area-inset-left,0px));
+  background:linear-gradient(var(--night),rgba(18,48,90,.85));color:#fff;display:flex;flex-direction:column;gap:8px}
+.brand{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.brand h1{margin:0;font:700 22px/1 var(--f-display);letter-spacing:.02em;text-transform:uppercase}
+.brand span{font-size:12px;opacity:.8}
+.row{display:flex;gap:8px}
+#q{flex:1;min-width:0;border:0;border-radius:10px;padding:10px 12px;font:inherit;font-size:16px;background:#fff;color:#172033}
+button{font:600 14px var(--f-body);border:0;border-radius:10px;padding:0 12px;cursor:pointer}
+.btn-loc{background:var(--ef);color:#12305a;min-width:44px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{background:rgba(255,255,255,.14);color:#fff;padding:7px 11px;border-radius:999px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:6px}
+.chip[aria-pressed="true"]{background:#fff;color:#12305a}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:1000;background:var(--card);border-radius:18px 18px 0 0;box-shadow:0 -6px 24px rgba(0,0,0,.18);
+  max-height:42vh;display:flex;flex-direction:column;padding-bottom:env(safe-area-inset-bottom,0px);transition:max-height .25s}
+.sheet.small{max-height:92px}
+.handle{padding:8px max(16px,env(safe-area-inset-left,0px)) 6px;display:flex;flex-direction:column;gap:4px;cursor:pointer}
+.handle::before{content:"";width:40px;height:4px;border-radius:2px;background:var(--line);align-self:center}
+#status{font-size:13px;color:var(--muted)}
+#count{font:700 17px var(--f-display);letter-spacing:.02em}
+#list{list-style:none;margin:0;padding:0 max(16px,env(safe-area-inset-right,0px)) 12px max(16px,env(safe-area-inset-left,0px));overflow-y:auto}
+#list li{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);cursor:pointer}
+#list .d{margin-left:auto;font:600 15px var(--f-display);white-space:nowrap;font-variant-numeric:tabular-nums}
+#list .n{font-weight:600;min-width:0}
+#list .s{font-size:13px;color:var(--muted)}
+.tag{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 6px;border-radius:4px;color:#fff}
+.tag.ef{background:var(--ef);color:#12305a}.tag.t2{background:var(--t2)}.tag.free{background:var(--ok)}
+.leaflet-popup-content{font:14px/1.4 var(--f-body);margin:12px 14px}
+.leaflet-popup-content b{font-size:15px}
+.pop-tags{display:flex;gap:4px;flex-wrap:wrap;margin:6px 0}
+.go{display:inline-block;margin-top:6px;background:var(--night);color:#fff!important;padding:7px 12px;border-radius:8px;text-decoration:none;font-weight:600}
+.leaflet-top{top:calc(env(safe-area-inset-top,0px) + 150px)}
+button:focus-visible,#q:focus-visible{outline:3px solid var(--ef);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<header class="top">
+  <div class="brand"><h1>Bornes Twizy</h1><span>prise domestique 2,2 kW</span></div>
+  <form class="row" id="search">
+    <input id="q" type="search" placeholder="Ville ou adresse…" autocomplete="off" enterkeyhint="search">
+    <button type="button" class="btn-loc" id="loc" aria-label="Me localiser">◎</button>
+  </form>
+  <div class="chips">
+    <button type="button" class="chip" id="fEF" aria-pressed="true"><i class="dot" style="background:var(--ef)"></i>Prise E/F (câble d'origine)</button>
+    <button type="button" class="chip" id="fT2" aria-pressed="false"><i class="dot" style="background:var(--t2)"></i>Type 2 (câble adaptateur)</button>
+  </div>
+</header>
+
+<section class="sheet" id="sheet">
+  <div class="handle" id="handle"><span id="count">Bornes à proximité</span><span id="status">Chargement…</span></div>
+  <ul id="list"></ul>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// Source principale : Base nationale IRVE (data.gouv.fr, API tabulaire). Secours : OpenStreetMap (Overpass).
+const IRVE_RID = "eb76d20a-8501-400e-b336-d85724de5435";
+const IRVE_API = "https://tabular-api.data.gouv.fr/api/resources/" + IRVE_RID + "/data/";
+const OVERPASS = "https://overpass-api.de/api/interpreter";
+const MIN_ZOOM = 11;
+
+const $ = id => document.getElementById(id);
+const store = { get(k){try{return localStorage.getItem(k)}catch(e){return null}}, set(k,v){try{localStorage.setItem(k,v)}catch(e){}} };
+
+let wantT2 = store.get("t2") === "1";
+$("fT2").setAttribute("aria-pressed", wantT2);
+
+const firstVisit = !store.get("view");
+const start = JSON.parse(store.get("view") || "null") || {lat:46.6705, lng:-1.4260, z:13}; // La Roche-sur-Yon par défaut
+const map = L.map("map", {zoomControl:false, attributionControl:true}).setView([start.lat, start.lng], start.z);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, attribution:"© OpenStreetMap"}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+let me = null, stations = [], reqId = 0;
+
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const truthy = v => v === true || v === 1 || /^(true|1|oui|yes)$/i.test(String(v));
+function dist(a, b){const R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dg=(b.lng-a.lng)*r;
+  const h=Math.sin(dl/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h));}
+const fmtKm = d => d < 1 ? Math.round(d*1000) + " m" : d.toFixed(d < 10 ? 1 : 0).replace(".", ",") + " km";
+
+// --- IRVE : une ligne = un point de charge, regroupé par station
+async function fetchIRVE(b, col){
+  const p = new URLSearchParams({page_size:"50"});
+  p.set(col + "__exact", "true");
+  p.set("consolidated_latitude__greater", b.getSouth()); p.set("consolidated_latitude__less", b.getNorth());
+  p.set("consolidated_longitude__greater", b.getWest()); p.set("consolidated_longitude__less", b.getEast());
+  let url = IRVE_API + "?" + p, rows = [], pages = 0;
+  while (url && pages < 12){
+    const r = await fetch(url); if (!r.ok) throw new Error("IRVE " + r.status);
+    const j = await r.json(); rows = rows.concat(j.data || []); url = j.links && j.links.next; pages++;
+  }
+  return rows;
+}
+function fromIRVE(rows){
+  const by = new Map();
+  for (const r of rows){
+    const lat = +r.consolidated_latitude, lng = +r.consolidated_longitude; if (!lat || !lng) continue;
+    const k = lat.toFixed(5) + "," + lng.toFixed(5);
+    let s = by.get(k);
+    if (!s){ s = {lat, lng, name:r.nom_station || r.nom_enseigne || "Borne", addr:r.adresse_station || "", op:r.nom_operateur || r.nom_enseigne || "",
+      hours:r.horaires || "", free:truthy(r.gratuit), price:r.tarification || "", access:r.condition_acces || "", ef:0, t2:0, pdc:0, kw:0}; by.set(k, s); }
+    s.pdc++; if (truthy(r.prise_type_ef)) s.ef++; if (truthy(r.prise_type_2)) s.t2++;
+    s.kw = Math.max(s.kw, +r.puissance_nominale || 0);
+  }
+  return [...by.values()];
+}
+// --- OSM en secours
+async function fetchOSM(b, t2){
+  const bb = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()].join(",");
+  const q = `[out:json][timeout:25];(nwr["amenity"="charging_station"]["socket:schuko"](${bb});nwr["amenity"="charging_station"]["socket:typee"](${bb});${t2 ? `nwr["amenity"="charging_station"]["socket:type2"](${bb});` : ""});out center tags;`;
+  const r = await fetch(OVERPASS, {method:"POST", body:"data=" + encodeURIComponent(q), headers:{"Content-Type":"application/x-www-form-urlencoded"}});
+  if (!r.ok) throw new Error("OSM " + r.status);
+  return (await r.json()).elements.map(e => { const t = e.tags || {}, c = e.center || e;
+    const ef = +(t["socket:schuko"] || t["socket:typee"] || 0) || (t["socket:schuko"] || t["socket:typee"] ? 1 : 0);
+    const t2v = +(t["socket:type2"] || 0) || (t["socket:type2"] ? 1 : 0);
+    return {lat:c.lat, lng:c.lon, name:t.name || t.operator || "Borne", addr:[t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" "),
+      op:t.operator || t.network || "", hours:t.opening_hours || "", free:t.fee === "no", price:t["charge"] || "", access:t.access || "", ef, t2:t2v, pdc:+t.capacity || 0, kw:0}; });
+}
+
+async function load(){
+  const id = ++reqId, b = map.getBounds();
+  store.set("view", JSON.stringify({lat:map.getCenter().lat, lng:map.getCenter().lng, z:map.getZoom()}));
+  if (map.getZoom() < MIN_ZOOM){ layer.clearLayers(); stations = []; render("Zoomez sur la carte pour afficher les bornes."); return; }
+  $("status").textContent = "Recherche des bornes…";
+  let list = [], src = "Base nationale IRVE";
+  try {
+    const rows = await fetchIRVE(b, "prise_type_ef");
+    if (wantT2) rows.push(...await fetchIRVE(b, "prise_type_2"));
+    list = fromIRVE(rows);
+  } catch(e) {
+    try { list = await fetchOSM(b, wantT2); src = "OpenStreetMap"; }
+    catch(e2) { if (id === reqId) render("Impossible de joindre les données. Vérifiez la connexion puis bougez la carte."); return; }
+  }
+  if (id !== reqId) return;
+  stations = list.filter(s => s.ef || (wantT2 && s.t2));
+  draw(); render("Source : " + src);
+}
+
+function tags(s){ return (s.ef ? `<span class="tag ef">E/F ×${s.ef}</span>` : "") + (s.t2 ? `<span class="tag t2">Type 2 ×${s.t2}</span>` : "") + (s.free ? `<span class="tag free">Gratuit</span>` : ""); }
+function popup(s){
+  return `<b>${esc(s.name)}</b><br><span style="color:var(--muted)">${esc(s.addr)}</span>
+  <div class="pop-tags">${tags(s)}</div>
+  ${s.op ? "Opérateur : " + esc(s.op) + "<br>" : ""}${s.hours ? "Horaires : " + esc(s.hours) + "<br>" : ""}
+  ${s.price && !s.free ? "Tarif : " + esc(s.price) + "<br>" : ""}${s.access ? "Accès : " + esc(s.access) + "<br>" : ""}
+  ${!s.ef ? "<em>Type 2 seulement : câble adaptateur nécessaire.</em><br>" : ""}
+  <a class="go" target="_blank" rel="noopener" href="https://maps.apple.com/?daddr=${s.lat},${s.lng}&dirflg=d">Itinéraire</a>`;
+}
+function draw(){
+  layer.clearLayers();
+  for (const s of stations){
+    s.m = L.circleMarker([s.lat, s.lng], {radius:9, weight:2, color:"#fff", fillOpacity:1, fillColor: s.ef ? css("--ef") : css("--t2")})
+      .bindPopup(popup(s)).addTo(layer);
+  }
+}
+function render(msg){
+  const ref = me || map.getCenter();
+  stations.forEach(s => s.d = dist(ref, {lat:s.lat, lng:s.lng}));
+  stations.sort((a, b) => a.d - b.d);
+  $("count").textContent = stations.length ? stations.length + (stations.length > 1 ? " bornes compatibles" : " borne compatible") : "Aucune borne compatible ici";
+  $("status").textContent = msg;
+  const ul = $("list"); ul.innerHTML = "";
+  stations.slice(0, 60).forEach(s => {
+    const li = document.createElement("li");
+    li.innerHTML = `<i class="dot" style="margin-top:6px;background:${s.ef ? "var(--ef)" : "var(--t2)"}"></i>
+      <div class="n">${esc(s.name)}<div class="s">${esc(s.addr || s.op)}</div><div class="pop-tags">${tags(s)}</div></div><span class="d">${fmtKm(s.d)}</span>`;
+    li.onclick = () => { map.setView([s.lat, s.lng], Math.max(map.getZoom(), 16)); setTimeout(() => s.m && s.m.openPopup(), 300); $("sheet").classList.add("small"); };
+    ul.appendChild(li);
+  });
+}
+
+let t; map.on("moveend", () => { clearTimeout(t); t = setTimeout(load, 400); });
+$("handle").onclick = () => $("sheet").classList.toggle("small");
+$("fT2").onclick = () => { wantT2 = !wantT2; $("fT2").setAttribute("aria-pressed", wantT2); store.set("t2", wantT2 ? "1" : "0"); load(); };
+
+let meMarker;
+function locate(){
+  if (!navigator.geolocation){ $("status").textContent = "Localisation indisponible sur cet appareil."; return; }
+  $("status").textContent = "Localisation…";
+  navigator.geolocation.getCurrentPosition(p => {
+    me = {lat:p.coords.latitude, lng:p.coords.longitude};
+    if (meMarker) meMarker.remove();
+    meMarker = L.circleMarker([me.lat, me.lng], {radius:7, color:"#fff", weight:3, fillColor:"#1a73e8", fillOpacity:1}).addTo(map);
+    map.setView([me.lat, me.lng], 14);
+  }, () => { $("status").textContent = "Localisation refusée. Cherchez une ville à la place."; }, {enableHighAccuracy:true, timeout:10000});
+}
+$("loc").onclick = locate;
+
+$("search").onsubmit = async e => {
+  e.preventDefault(); const q = $("q").value.trim(); if (!q) return;
+  $("q").blur(); $("status").textContent = "Recherche de « " + q + " »…";
+  try {
+    const r = await fetch("https://data.geopf.fr/geocodage/search?limit=1&q=" + encodeURIComponent(q));
+    const f = (await r.json()).features[0];
+    if (!f){ $("status").textContent = "Lieu introuvable."; return; }
+    const [lng, lat] = f.geometry.coordinates; me = null; map.setView([lat, lng], f.properties.type === "municipality" ? 13 : 15);
+  } catch(err){ $("status").textContent = "Recherche impossible pour le moment."; }
+};
+
+load();
+if (firstVisit) locate();
+</script>
+</body>
+</html>
