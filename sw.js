@@ -50,7 +50,8 @@ async function trim(c) {
 async function networkFirst(req) {
   const c = await caches.open(V + "-app");
   try {
-    const res = await fetch(req);
+    // no-cache : redemande toujours au serveur si la page a changé, pour voir les mises à jour tout de suite.
+    const res = await fetch(req, { cache: "no-cache" });
     if (res.ok) c.put(req, res.clone());
     return res;
   } catch (err) {
