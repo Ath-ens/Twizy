@@ -197,7 +197,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy</h1><div class="ver">Version 10 · 4 nov. 15 h 30</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 11 · 4 nov. 18 h 30</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -268,13 +268,6 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
       <details id="carSet">
         <summary>Réglages de ma Twizy</summary>
         <div class="dgrid">
-          <div class="set">
-            <label>Modèle</label><span></span>
-            <div class="seg">
-              <button type="button" id="m45" aria-pressed="false">Twizy 45</button>
-              <button type="button" id="m80" aria-pressed="true">Twizy 80</button>
-            </div>
-          </div>
           <div class="set">
             <label for="range">Autonomie réelle à 100 %</label><output id="rangeOut"></output>
             <input id="range" type="range" min="30" max="110" step="5">
@@ -351,7 +344,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 
 </body>
 </html>
