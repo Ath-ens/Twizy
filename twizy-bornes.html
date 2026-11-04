@@ -99,6 +99,20 @@ body.dragging .fab,body.dragging .sheet{transition:none}
 .cmp th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;font-weight:700;padding:4px 6px 4px 0}
 .cmp td{padding:6px 6px 6px 0;border-top:1px solid var(--line)}
 .cmp td:not(:first-child),.cmp th:not(:first-child){text-align:center}
+.tag.ok{background:var(--ok)}.tag.ko{background:#e11d48}
+.act.plug{background:var(--night);color:#fff}
+.mine{margin-top:16px;border:1px solid var(--line);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:10px}
+.mine-h{font-weight:700}
+.mine .seg button[aria-pressed="true"]#nOk{background:var(--ok);border-color:var(--ok)}
+.mine .seg button[aria-pressed="true"]#nKo{background:#e11d48;border-color:#e11d48}
+textarea{width:100%;min-width:0;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font:inherit;font-size:16px;background:var(--field);color:var(--fg);resize:vertical}
+.cpill{position:fixed;left:max(14px,env(safe-area-inset-left,0px));bottom:0;z-index:999;transform:translateY(calc(-1 * var(--vis) - 20px));transition:transform .28s cubic-bezier(.2,.8,.2,1);height:44px;padding:0 16px;border-radius:999px;background:var(--night);color:#fff;font:700 15px var(--f-body);box-shadow:0 4px 14px rgba(0,0,0,.3)}
+body.dragging .cpill{transition:none}
+.cbig{font:700 54px/1 var(--f-display);font-variant-numeric:tabular-nums}
+#cInfo{display:flex;flex-direction:column;gap:6px}
+#cInfo .m{font-size:14px;color:var(--muted)}
+#cInfo .m b{color:var(--fg)}
+.note.wx{color:var(--fg)}
 
 /* Fiche borne */
 .d-addr{font-size:15px;color:var(--muted)}
@@ -183,7 +197,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy</h1><div class="ver">Version 9 · 4 nov. 14 h 25</div></div>
+    <div><h1>Bornes Twizy</h1><div class="ver">Version 10 · 4 nov. 15 h 30</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -209,6 +223,8 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
   </button>
 </div>
+
+<button type="button" class="cpill" id="cpill" hidden></button>
 
 <section class="sheet" id="sheet">
   <div class="handle" id="handle">
@@ -285,6 +301,12 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
             <label for="detour">Détour maximum vers une borne</label><output id="detourOut"></output>
             <input id="detour" type="range" min="1" max="8" step="1">
           </div>
+          <label class="check"><input type="checkbox" id="wx"> Adapter l'autonomie à la météo prévue</label>
+          <small style="margin-top:-12px;color:var(--muted);font-size:12px">L'autonomie réglée correspond à un temps doux (20 °C). S'il fait froid, l'appli la réduit pour le calcul.</small>
+          <div class="set">
+            <label for="priceDef">Prix si le tarif est inconnu</label><output id="priceDefOut"></output>
+            <input id="priceDef" type="range" min="0.15" max="0.70" step="0.01">
+          </div>
           <label class="check"><input type="checkbox" id="useT2"> Utiliser aussi les bornes Type 2 (câble adaptateur)</label>
           <div class="field">
             <label for="ocmKey">Clé Open Charge Map (facultative)</label>
@@ -299,12 +321,37 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
   </div>
 
   <div class="pane" id="paneDetail" hidden></div>
+
+  <div class="pane" id="paneCharge" hidden>
+    <div class="form">
+      <div id="cSetup" class="form">
+        <div class="set">
+          <label for="cFrom">Batterie maintenant</label><output id="cFromOut"></output>
+          <input id="cFrom" type="range" min="0" max="95" step="5" value="20">
+          <div class="quick">
+            <button type="button" data-cfrom="10">10 %</button>
+            <button type="button" data-cfrom="20">20 %</button>
+            <button type="button" data-cfrom="30">30 %</button>
+            <button type="button" data-cfrom="50">50 %</button>
+          </div>
+        </div>
+        <div class="set">
+          <label for="cTo">Charger jusqu'à</label><output id="cToOut"></output>
+          <input id="cTo" type="range" min="50" max="100" step="5" value="100">
+        </div>
+      </div>
+      <div id="cInfo"></div>
+      <button type="button" class="primary" id="cGo">Démarrer le suivi</button>
+      <button type="button" class="ghost" id="cStop" hidden>Arrêter le suivi</button>
+      <div class="note">Estimation à partir de la durée d'une charge complète réglée dans « Réglages de ma Twizy ». Le suivi continue même si vous fermez l'appli.</div>
+    </div>
+  </div>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=8"></script>
+<script src="app.js?v=10"></script>
 
 </body>
 </html>
