@@ -39,6 +39,41 @@ function prettyHours(h){
 }
 const is24 = s => /24\s*\/\s*7|24\s*h?\s*\/\s*24|00:00\s*-\s*24:00|24h24|tous les jours.*24/i.test(s.hours || "");
 
+/* ---------- Mes notes sur les bornes (gardées sur le téléphone) ---------- */
+let notes = jget("notes", {});
+const noteOf = s => notes[s.k] || {};
+function setNote(s, patch){
+  const n = Object.assign({}, notes[s.k], patch, {t:Date.now()});
+  if (!n.status && !n.text) delete notes[s.k]; else notes[s.k] = n;
+  jset("notes", notes);
+}
+
+/* ---------- Coût : batterie Twizy 6,1 kWh, pertes du chargeur environ 15 % ---------- */
+const BATT = 6.1, EFF = 0.85;
+function pricePerKwh(s){
+  if (s.free) return 0;
+  const p = String(s.price || "").replace(/\s+/g, " ");
+  let m = p.match(/(\d+(?:[.,]\d+)?)\s*(?:€|eur(?:os?)?)\s*(?:ttc\s*)?(?:\/|par)\s*kwh/i);
+  if (m) return +m[1].replace(",", ".");
+  m = p.match(/(\d+(?:[.,]\d+)?)\s*(?:cts?|centimes?|c€)\s*(?:\/|par)?\s*kwh/i);
+  if (m) return +m[1].replace(",", ".") / 100;
+  return null;
+}
+const kwhFor = pct => Math.max(0, pct) / 100 * BATT / EFF;
+function costOf(s, pct){ const p = pricePerKwh(s); return {eur:kwhFor(pct) * (p == null ? cfg.priceDef : p), est:p == null}; }
+const fmtEur = c => (c.est ? "≈ " : "") + c.eur.toFixed(2).replace(".", ",") + " €";
+
+/* ---------- Météo : le froid réduit l'autonomie (Open-Meteo, sans clé) ---------- */
+async function tempAt(lat, lng, when){
+  const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=" + lat.toFixed(3) + "&longitude=" + lng.toFixed(3) + "&hourly=temperature_2m&forecast_days=3&timezone=Europe%2FParis");
+  if (!r.ok) throw new Error("météo");
+  const j = await r.json(), times = j.hourly.time.map(t => new Date(t).getTime());
+  let best = 0; times.forEach((t, i) => { if (Math.abs(t - when) < Math.abs(times[best] - when)) best = i; });
+  return j.hourly.temperature_2m[best];
+}
+const wxFactor = T => Math.max(0.62, Math.min(1, 0.75 + 0.0125 * T));
+let rangeNow = 0;
+
 /* ---------- État ---------- */
 const F = Object.assign({t2:false, free:false, h24:false, fav:false, conf:false}, jget("filters", {}));
 let favs = jget("favs", {});
@@ -280,8 +315,8 @@ const compatible = s => s.ef > 0 || (F.t2 && s.t2 > 0);
 const nsrc = s => (s.src || []).length;
 const shown = s => compatible(s) && (!F.free || s.free) && (!F.h24 || is24(s)) && (!F.fav || favs[s.k]) && (!F.conf || nsrc(s) >= 2);
 function markerFor(s){
-  const fav = !!favs[s.k];
-  return L.circleMarker([s.lat, s.lng], {renderer, radius: fav ? 10 : 8.5, weight: fav ? 3.5 : 2.5, color: fav ? COL.fav : "#fff", fillColor: s.ef ? COL.ef : COL.t2, fillOpacity:1})
+  const fav = !!favs[s.k], ko = noteOf(s).status === "ko";
+  return L.circleMarker([s.lat, s.lng], {renderer, radius: fav ? 10 : 8.5, weight: fav || ko ? 3.5 : 2.5, color: ko ? "#e11d48" : fav ? COL.fav : "#fff", fillColor: ko ? "#8a94a6" : s.ef ? COL.ef : COL.t2, fillOpacity:1})
     .on("click", () => { lastMarkerTap = Date.now(); showDetail(s, mode); });
 }
 function syncMarkers(rebuild){
@@ -333,7 +368,8 @@ map.on("click", () => {
 function tagsHTML(s){
   return (s.ef ? `<span class="tag ef">E/F ×${s.ef}</span>` : "") + (s.t2 ? `<span class="tag t2">Type 2 ×${s.t2}</span>` : "")
     + (s.free ? `<span class="tag free">Gratuit</span>` : "") + (is24(s) ? `<span class="tag h24">24 h/24</span>` : "")
-    + (nsrc(s) >= 2 ? `<span class="tag src">✓ ${nsrc(s)} sources</span>` : ""); }
+    + (nsrc(s) >= 2 ? `<span class="tag src">✓ ${nsrc(s)} sources</span>` : "")
+    + (noteOf(s).status === "ok" ? `<span class="tag ok">✓ testée</span>` : noteOf(s).status === "ko" ? `<span class="tag ko">✗ en panne</span>` : ""); }
 function compareHTML(s){
   const src = s.src || []; if (!src.length) return "";
   const yes = v => v ? (v === true ? "oui" : v) : "–";
@@ -412,8 +448,8 @@ addEventListener("resize", () => { setSnap(snapName); map.invalidateSize(); });
 
 function showPane(name){
   pane = name;
-  $("paneMap").hidden = name !== "map"; $("paneTrip").hidden = name !== "trip"; $("paneDetail").hidden = name !== "detail";
-  $("back").hidden = name !== "detail";
+  $("paneMap").hidden = name !== "map"; $("paneTrip").hidden = name !== "trip"; $("paneDetail").hidden = name !== "detail"; $("paneCharge").hidden = name !== "charge";
+  $("back").hidden = name !== "detail" && name !== "charge";
   if (name === "detail") $("paneDetail").scrollTop = 0;
 }
 
@@ -445,15 +481,31 @@ function showDetail(s, from, extra){
     <div class="nav">${nb("apple", "Plans")}${nb("google", "Google Maps")}${nb("waze", "Waze")}</div>
     <div class="acts">
       ${from === "map" ? `<button type="button" class="act wide" id="dTrip">Trajet en Twizy jusqu'ici</button>` : ""}
+      <button type="button" class="act wide plug" id="dPlug">⚡ Je me branche ici</button>
       <button type="button" class="act" id="dFav" aria-pressed="${fav}">${fav ? "★ En favori" : "☆ Ajouter aux favoris"}</button>
       <button type="button" class="act" id="dCopy">Copier l'adresse</button>
     </div>
-    <dl class="info">${row("Opérateur", s.op)}${row("Horaires", prettyHours(s.hours))}${row("Tarif", s.free ? "Gratuit" : s.price)}${row("Accès", s.access)}
+    <div class="mine">
+      <div class="mine-h">Mon avis sur cette borne</div>
+      <div class="seg">
+        <button type="button" id="nOk" aria-pressed="${noteOf(s).status === "ok"}">✓ Ça marche</button>
+        <button type="button" id="nKo" aria-pressed="${noteOf(s).status === "ko"}">✗ En panne</button>
+      </div>
+      <textarea id="nText" rows="2" placeholder="Note perso : emplacement de la prise, code, horaires réels…">${esc(noteOf(s).text || "")}</textarea>
+      <div class="note" id="nSaved">${noteOf(s).t ? "Mis à jour le " + new Date(noteOf(s).t).toLocaleDateString("fr-FR") : "Gardé uniquement sur ce téléphone."}</div>
+    </div>
+    <dl class="info">${row("Opérateur", s.op)}${row("Horaires", prettyHours(s.hours))}${row("Tarif", s.free ? "Gratuit" : s.price)}${row("Recharge 0 → 100 %", fmtEur(costOf(s, 100)) + (pricePerKwh(s) == null ? " (tarif inconnu, estimé à " + cfg.priceDef.toFixed(2).replace(".", ",") + " €/kWh)" : ""))}${row("Accès", s.access)}
       ${row("Prises", [s.ef ? s.ef + " prise" + (s.ef > 1 ? "s" : "") + " E/F" : "", s.t2 ? s.t2 + " Type 2" : ""].filter(Boolean).join(" · "))}</dl>
     ${!s.ef ? `<div class="alert">Pas de prise domestique ici : il faut le câble adaptateur Type 2.</div>` : ""}
     ${compareHTML(s)}
     <div class="note">Vérifiez que la borne est accessible avant de partir.</div>`;
   if ($("dTrip")) $("dTrip").onclick = () => tripTo(s);
+  $("dPlug").onclick = () => openCharge(s);
+  const paintNote = () => { $("nOk").setAttribute("aria-pressed", noteOf(s).status === "ok"); $("nKo").setAttribute("aria-pressed", noteOf(s).status === "ko");
+    $("nSaved").textContent = noteOf(s).t ? "Enregistré ✓ · gardé uniquement sur ce téléphone" : "Gardé uniquement sur ce téléphone."; };
+  const toggleSt = st => { setNote(s, {status: noteOf(s).status === st ? "" : st}); paintNote(); syncMarkers(true); };
+  $("nOk").onclick = () => toggleSt("ok"); $("nKo").onclick = () => toggleSt("ko");
+  let nt; $("nText").oninput = () => { clearTimeout(nt); nt = setTimeout(() => { setNote(s, {text:$("nText").value.trim()}); paintNote(); }, 500); };
   $("dFav").onclick = () => {
     if (favs[s.k]) delete favs[s.k]; else favs[s.k] = slim(s);
     jset("favs", favs);
@@ -475,7 +527,7 @@ function closeDetail(){
   if (from === "map" && mode === "map"){ showPane("map"); renderList(); }
   else if (mode === "trip"){ showPane("trip"); restoreTripHead(); }
 }
-$("back").onclick = closeDetail;
+$("back").onclick = () => pane === "charge" ? closeCharge() : closeDetail();
 
 /* ---------- Localisation ---------- */
 function getPos(){
@@ -556,10 +608,10 @@ $("ocmKey").onchange = () => {
 };
 
 /* ---------- Réglages Twizy ---------- */
-const DEF = {soc:100, range:75, reserve:15, target:100, full:210, detour:3, model:"80"};
+const DEF = {soc:100, range:75, reserve:15, target:100, full:210, detour:3, model:"80", wx:true, priceDef:0.35};
 const cfg = Object.assign({}, DEF, jget("cfg", {}));
 const saveCfg = () => jset("cfg", cfg);
-const outFmt = {soc:v => v + " %", range:v => v + " km", reserve:v => v + " %", target:v => v + " %", full:v => fmtH(v), detour:v => v + " km"};
+const outFmt = {soc:v => v + " %", range:v => v + " km", reserve:v => v + " %", target:v => v + " %", full:v => fmtH(v), detour:v => v + " km", priceDef:v => v.toFixed(2).replace(".", ",") + " €/kWh"};
 function paintQuick(){ document.querySelectorAll("[data-set]").forEach(b => b.setAttribute("aria-pressed", +cfg[b.dataset.set] === +b.dataset.v)); }
 for (const k of Object.keys(outFmt)){
   const el = $(k); el.value = cfg[k]; $(k + "Out").textContent = outFmt[k](+cfg[k]);
@@ -569,6 +621,62 @@ document.querySelectorAll("[data-set]").forEach(b => b.onclick = () => {
   const k = b.dataset.set, v = +b.dataset.v; cfg[k] = v; $(k).value = v; $(k + "Out").textContent = outFmt[k](v); saveCfg(); paintQuick(); });
 function setModel(m){ cfg.model = m; $("m45").setAttribute("aria-pressed", m === "45"); $("m80").setAttribute("aria-pressed", m === "80"); saveCfg(); }
 $("m45").onclick = () => setModel("45"); $("m80").onclick = () => setModel("80"); setModel(cfg.model); paintQuick();
+$("wx").checked = cfg.wx; $("wx").onchange = () => { cfg.wx = $("wx").checked; saveCfg(); };
+
+/* ---------- Suivi de recharge ---------- */
+let charge = jget("charge", null), chargeFrom = "map";
+function chargeState(c){
+  const rate = 100 / cfg.full / 6e4;
+  const pct = Math.min(c.to, c.from + (Date.now() - c.start) * rate);
+  const end = c.start + (c.to - c.from) / rate;
+  return {pct, end, done: Date.now() >= end};
+}
+function paintChargePill(){
+  const pill = $("cpill");
+  if (!charge){ pill.hidden = true; return; }
+  const st = chargeState(charge);
+  pill.hidden = false;
+  pill.textContent = st.done ? "⚡ Chargée à " + charge.to + " % ✓" : "⚡ " + Math.floor(st.pct) + " % · fin " + fmtClock(st.end, Date.now());
+  if (pane === "charge") paintCharge();
+}
+function paintCharge(){
+  const from = +$("cFrom").value, to = +$("cTo").value;
+  $("cFromOut").textContent = from + " %"; $("cToOut").textContent = to + " %";
+  const s = charge ? charge.s : chargeTarget, c = s ? costOf(s, to - from) : null;
+  if (charge){
+    const st = chargeState(charge), left = Math.max(0, st.end - Date.now()) / 6e4;
+    $("cInfo").innerHTML = `<div class="cbig">${Math.floor(st.pct)} %</div>${socBar(charge.from, st.pct)}
+      <div class="m">${st.done ? "Recharge terminée ✓" : "Fin prévue à <b>" + fmtClock(st.end, Date.now()) + "</b>, dans " + fmtH(left)}</div>
+      <div class="m">Branchée à ${charge.from} % à ${fmtClock(charge.start, charge.start)} · objectif ${charge.to} %${charge.s ? " · " + fmtEur(costOf(charge.s, charge.to - charge.from)) : ""}</div>`;
+    $("cSetup").hidden = true; $("cGo").hidden = true; $("cStop").hidden = false;
+  } else {
+    const min = Math.max(0, to - from) / 100 * cfg.full;
+    $("cInfo").innerHTML = `<div class="m">Durée estimée : <b>${fmtH(min)}</b> · fin vers <b>${fmtClock(Date.now() + min * 6e4, Date.now())}</b>${c ? " · " + fmtEur(c) : ""}</div>`;
+    $("cSetup").hidden = false; $("cGo").hidden = false; $("cStop").hidden = true;
+  }
+}
+let chargeTarget = null;
+function openCharge(s){
+  chargeFrom = mode; if (s) chargeTarget = s;
+  if (detail){ detail = null; selLayer.clearLayers(); }
+  if (!charge){ $("cTo").value = cfg.target; }
+  $("hTitle").textContent = "⚡ Recharge" + ((charge ? charge.s : chargeTarget) ? " · " + (charge ? charge.s : chargeTarget).name : "");
+  $("hSub").textContent = charge ? "Suivi en cours · gardé même si vous fermez l'appli" : "Indiquez la batterie actuelle puis démarrez";
+  showPane("charge"); if (snapName === "peek") setSnap("half"); paintCharge();
+}
+function closeCharge(){ if (mode === "map"){ showPane("map"); renderList(); } else { showPane("trip"); restoreTripHead(); } }
+$("cFrom").oninput = paintCharge; $("cTo").oninput = paintCharge;
+document.querySelectorAll("[data-cfrom]").forEach(b => b.onclick = () => { $("cFrom").value = b.dataset.cfrom; paintCharge(); });
+$("cGo").onclick = () => {
+  const from = +$("cFrom").value, to = +$("cTo").value;
+  if (to <= from){ $("cInfo").innerHTML = `<div class="alert">L'objectif doit être plus haut que la batterie actuelle.</div>`; return; }
+  charge = {start:Date.now(), from, to, s: chargeTarget ? slim(chargeTarget) : null};
+  jset("charge", charge); paintChargePill(); openCharge();
+};
+$("cStop").onclick = () => { charge = null; store.set("charge", ""); paintChargePill(); openCharge(); };
+$("cpill").onclick = () => openCharge();
+setInterval(paintChargePill, 20000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) paintChargePill(); });
 suggest($("from"), $("fromSugg")); suggest($("to"), $("toSugg"));
 $("swap").onclick = () => {
   const a = $("from"), b = $("to"), av = [a.value, a.dataset.lat, a.dataset.lng], bv = [b.value, b.dataset.lat, b.dataset.lng];
@@ -662,7 +770,7 @@ async function stationsAlong(sp, padKm, onProgress){
   const res = [];
   for (const s of all.values()){
     if (s.lat < s0 - padLat || s.lat > n0 + padLat || s.lng < w0 - padLng || s.lng > e0 + padLng) continue;
-    if (!compatible(s)) continue;
+    if (!compatible(s) || noteOf(s).status === "ko") continue;
     let best = Infinity, km = 0;
     for (const p of sp){ if (Math.abs(p.lat - s.lat) > 0.1) continue; const d = hav(p, s); if (d < best){ best = d; km = p.km; } }
     const detour = best * 1.3;
@@ -671,7 +779,7 @@ async function stationsAlong(sp, padKm, onProgress){
   return {list:res.sort((a, b) => a.km - b.km), bad};
 }
 function plan(totalKm, cand){
-  const pctPerKm = 100 / cfg.range, reserve = cfg.reserve, target = cfg.target;
+  const pctPerKm = 100 / (rangeNow || cfg.range), reserve = cfg.reserve, target = cfg.target;
   let pos = 0, soc = cfg.soc, back = 0; const stops = [];
   for (let guard = 0; guard < 40; guard++){
     const usable = (soc - reserve) / pctPerKm;
@@ -719,7 +827,17 @@ $("tripForm").onsubmit = async e => {
     const sp = sampleRoute(r.pts);
     tripLayer.clearLayers(); selLayer.clearLayers();
     const line = L.polyline(r.pts.map(p => [p.lat, p.lng]), {color:COL.route, weight:6, opacity:.85, interactive:false}).addTo(tripLayer);
-    const directOk = r.km <= ((cfg.soc - cfg.reserve) / 100) * cfg.range;
+    const [hh, mm] = ($("dep").value || nowHHMM()).split(":").map(Number);
+    const dep = new Date(); dep.setHours(hh, mm, 0, 0);
+    rangeNow = cfg.range; let wxNote = "";
+    if (cfg.wx){
+      status("Météo du trajet…");
+      try { const mid = sp[Math.floor(sp.length / 2)], T = await tempAt(mid.lat, mid.lng, dep.getTime() + r.min * 3e4);
+        rangeNow = Math.round(cfg.range * wxFactor(T));
+        wxNote = `Météo prévue sur le trajet : ${Math.round(T)} °C → autonomie estimée ${rangeNow} km` + (rangeNow < cfg.range ? ` (au lieu de ${cfg.range} km)` : "") + "."; }
+      catch(e){ wxNote = "Météo indisponible : autonomie réglée utilisée."; }
+    }
+    const directOk = r.km <= ((cfg.soc - cfg.reserve) / 100) * rangeNow;
     let cand = [], bad = 0;
     if (!directOk){ status("Recherche des bornes sur le trajet…");
       ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status(d < 0 ? "Comparaison avec les autres sources…" : "Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
@@ -727,12 +845,12 @@ $("tripForm").onsubmit = async e => {
     const speed = cfg.model === "45" ? 38 : 55;
     const driveMin = r.twizy ? Math.max(r.min * 1.1, r.km / (speed * 1.25) * 60) : Math.max(r.min, r.km / speed * 60);
     const minPerKm = driveMin / Math.max(r.km, 0.1);
-    const [hh, mm] = ($("dep").value || nowHHMM()).split(":").map(Number);
-    const dep = new Date(); dep.setHours(hh, mm, 0, 0);
     let t = dep.getTime(), prevKm = 0, back = 0;
     res.stops.forEach(x => { x.arrT = t + ((x.s.km - prevKm) + back + x.s.detour) * minPerKm * 6e4; x.leaveT = x.arrT + x.minutes * 6e4; t = x.leaveT; prevKm = x.s.km; back = x.s.detour; });
     const arrT = t + (r.km - prevKm + back) * minPerKm * 6e4;
     const chargeMin = res.stops.reduce((s, x) => s + x.minutes, 0);
+    res.stops.forEach(x => x.cost = costOf(x.s, x.chargeTo - x.arrive));
+    const cost = {eur:res.stops.reduce((a, x) => a + x.cost.eur, 0), est:res.stops.some(x => x.cost.est)};
 
     cand.forEach(s => { if (!res.stops.some(x => x.s === s))
       L.circleMarker([s.lat, s.lng], {renderer, radius:6, weight:1.5, color:"#fff", fillOpacity:.9, fillColor:s.ef ? COL.ef : COL.t2})
@@ -740,17 +858,18 @@ $("tripForm").onsubmit = async e => {
     L.marker([a.lat, a.lng], {icon:pinIcon("A", "end-icon"), interactive:false}).addTo(tripLayer);
     L.marker([b.lat, b.lng], {icon:pinIcon("B", "end-icon"), interactive:false}).addTo(tripLayer);
     const stopInfo = (x, i) => `<div class="stopinfo"><b>Arrêt ${i + 1}</b> · km ${Math.round(x.s.km)}<br>
-      Arrivée vers <b>${fmtClock(x.arrT, dep)}</b> avec ${Math.round(x.arrive)} % · recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}) · départ vers ${fmtClock(x.leaveT, dep)}
+      Arrivée vers <b>${fmtClock(x.arrT, dep)}</b> avec ${Math.round(x.arrive)} % · recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}, ${fmtEur(x.cost)}) · départ vers ${fmtClock(x.leaveT, dep)}
       ${socBar(x.arrive, x.chargeTo)}</div>`;
     res.stops.forEach((x, i) => { L.marker([x.s.lat, x.s.lng], {icon:pinIcon(i + 1, "num-icon"), zIndexOffset:500})
       .on("click", () => { lastMarkerTap = Date.now(); showDetail(x.s, "trip", stopInfo(x, i)); }).addTo(tripLayer); });
 
     let html = `<div class="summary">
       <div><b>${Math.round(r.km)}</b><span>km</span></div>
-      <div><b>${res.stops.length}</b><span>${res.stops.length > 1 ? "arrêts" : "arrêt"}</span></div>
       <div><b>${fmtH(chargeMin)}</b><span>recharge</span></div>
+      <div><b>${res.stops.length ? fmtEur(cost).replace("≈ ", "") : "0 €"}</b><span>${cost.est ? "coût estimé" : "coût"}</span></div>
       <div><b>${fmtClock(arrT, dep)}</b><span>arrivée</span></div></div>
-      <div class="note" style="margin-top:0">Conduite ${fmtH(driveMin)} + recharge ${fmtH(chargeMin)} = ${fmtH((arrT - dep) / 6e4)} au total.</div>`;
+      <div class="note" style="margin-top:0">${plural(res.stops.length, "arrêt")} · conduite ${fmtH(driveMin)} + recharge ${fmtH(chargeMin)} = ${fmtH((arrT - dep) / 6e4)} au total.</div>
+      ${wxNote ? `<div class="note wx">${esc(wxNote)}</div>` : ""}`;
     if (!r.twizy) html += `<div class="alert">Calcul de secours : l'itinéraire peut emprunter une voie express interdite à la Twizy. Réessayez dans un moment.</div>`;
     if (bad) html += `<div class="alert">Une partie des bornes n'a pas pu être chargée : le plan peut en manquer.</div>`;
     if (!res.ok) html += `<div class="alert">Aucune borne compatible atteignable : la batterie atteint la réserve vers le km ${Math.max(0, Math.round(res.failAt))}${res.gapTo ? ` et la borne suivante est au km ${Math.round(res.gapTo)}` : ""}. Augmentez le détour maximum, baissez la réserve ou partez plus chargé.</div>`;
@@ -759,13 +878,13 @@ $("tripForm").onsubmit = async e => {
       html += `<li data-i="${i}"><span class="pin stop">${i + 1}</span><div>
         <div class="t">${esc(x.s.name)}</div>
         <div class="m">Km ${Math.round(x.s.km)}${x.s.detour > 0.3 ? " · détour " + fmtKm(x.s.detour) : ""}${x.s.addr ? " · " + esc(x.s.addr) : ""}</div>
-        <div class="m"><span class="clock">${fmtClock(x.arrT, dep)}</span> arrivée avec ${Math.round(x.arrive)} % → recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}) · repart <span class="clock">${fmtClock(x.leaveT, dep)}</span></div>
+        <div class="m"><span class="clock">${fmtClock(x.arrT, dep)}</span> arrivée avec ${Math.round(x.arrive)} % → recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}, ${fmtEur(x.cost)}) · repart <span class="clock">${fmtClock(x.leaveT, dep)}</span></div>
         ${socBar(x.arrive, x.chargeTo)}<div class="tags">${tagsHTML(x.s)}</div>
         <a class="go" data-app="${navApp}" target="_blank" rel="noopener" href="${navURL(navApp, x.s.lat, x.s.lng)}">Y aller</a></div></li>`;
     });
     if (res.ok) html += `<li><span class="pin">B</span><div><div class="t">${esc(b.label)}</div><div class="m"><span class="clock">${fmtClock(arrT, dep)}</span> · arrivée avec environ ${Math.round(res.arrival)} %</div>
       <a class="go" data-app="${navApp}" target="_blank" rel="noopener" href="${navURL(navApp, b.lat, b.lng)}">Y aller</a></div></li>`;
-    html += `</ol><div class="note">Estimation avec ${cfg.range} km d'autonomie${cand.length ? " et " + plural(cand.length, "borne") + " compatible" + (cand.length > 1 ? "s" : "") + " trouvée" + (cand.length > 1 ? "s" : "") + " sur le trajet" : ""}. Touchez un arrêt pour voir la fiche de la borne.</div>
+    html += `</ol><div class="note">Estimation avec ${rangeNow} km d'autonomie${cand.length ? " et " + plural(cand.length, "borne") + " compatible" + (cand.length > 1 ? "s" : "") + " trouvée" + (cand.length > 1 ? "s" : "") + " sur le trajet" : ""}. Touchez un arrêt pour voir la fiche de la borne.</div>
       <button type="button" class="ghost" id="edit">Modifier le trajet ou les réglages</button>`;
     out.innerHTML = html; out.hidden = false; $("tripForm").hidden = true;
     $("paneTrip").scrollTop = 0;
@@ -806,6 +925,7 @@ try { const c = document.createElement("canvas"); c.width = c.height = 180; cons
 
 /* ---------- Démarrage ---------- */
 paintFilters();
+paintChargePill();
 showPane("map");
 setSnap("peek");
 syncMarkers(true);
