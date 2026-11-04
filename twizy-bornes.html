@@ -335,6 +335,7 @@ let mode = "map", pane = "map", me = null, meMarker = null, detail = null, tripH
 /* ---------- Carte ---------- */
 const firstVisit = !store.get("view");
 const start = jget("view", null) || {lat:46.6705, lng:-1.4260, z:13};
+if (start.z < MIN_ZOOM) start.z = 12;
 const map = L.map("map", {zoomControl:false, attributionControl:false, preferCanvas:true, bounceAtZoomLimits:false}).setView([start.lat, start.lng], start.z);
 L.control.attribution({position:"topright", prefix:false}).addTo(map);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, keepBuffer:6, updateWhenZooming:false,
@@ -497,8 +498,8 @@ function scheduleRender(){ if (rafPending) return; rafPending = true;
 let wanted = new Set(), pending = 0, failed = 0, loadTimer = null;
 const setLoading = on => { $("spin").hidden = !on; };
 function loadNear(){
-  jset("view", {lat:+map.getCenter().lat.toFixed(5), lng:+map.getCenter().lng.toFixed(5), z:map.getZoom()});
   if (mode !== "map") return;
+  jset("view", {lat:+map.getCenter().lat.toFixed(5), lng:+map.getCenter().lng.toFixed(5), z:map.getZoom()});
   if (map.getZoom() < MIN_ZOOM){ wanted = new Set(); renderList("Zoomez un peu pour afficher les bornes."); return; }
   const b = map.getBounds().pad(0.3), c = map.getCenter();
   const cells = cellsFor({s:b.getSouth(), n:b.getNorth(), w:b.getWest(), e:b.getEast()});
@@ -536,7 +537,7 @@ function renderList(msg){
   const vis = [...all.values()].filter(s => shown(s) && (F.fav || view.contains([s.lat, s.lng])));
   vis.forEach(s => s.d = hav(ref, s)); vis.sort((a, b) => a.d - b.d);
   const n = vis.length;
-  $("hTitle").textContent = F.fav ? (n ? plural(n, "favori") : "Aucun favori") : (n ? n + (n > 1 ? " bornes compatibles" : " borne compatible") : (pending ? "Recherche des bornes…" : "Aucune borne compatible ici"));
+  $("hTitle").textContent = F.fav ? (n ? plural(n, "favori") : "Aucun favori") : map.getZoom() < MIN_ZOOM ? "Rapprochez la carte" : (n ? n + (n > 1 ? " bornes compatibles" : " borne compatible") : (pending ? "Recherche des bornes…" : "Aucune borne compatible ici"));
   $("hSub").textContent = msg || (failed && !n ? "Données indisponibles (" + (lastErr || "réseau") + "). Bougez la carte pour réessayer."
     : (me ? "Triées par distance de vous" : "Triées par distance du centre de la carte") + (sourceName ? " · " + sourceName : ""));
   const frag = document.createDocumentFragment();
