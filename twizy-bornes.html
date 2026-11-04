@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Bornes Twizy">
 <meta name="theme-color" content="#12305a">
-<link rel="apple-touch-icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALQAAAC0CAIAAACyr5FlAAAE80lEQVR4Xu2c0W0bQQwF7SAV+D8d5MP1uJKUkALTQRoJggMEQTpJy7sl+cid+Y6dPd7c7Eoy9P7x+fUGsMc3xgKPQA5ADrBDOYBygB3KAZQD7FAOoBxgh3IA5QA7lAMoB9ihHEA5wA7lAMoBdigHUA6wQzmAcoAdygGUA+xQDqAcYIdyAOUAO5QDKAfY+W7/kSb8/f1n/Ep+/Po5/o/b8L7IVzCYVBhhBV06yzFdiEd0FaWhHGFO3NPMklZyJGpxTRtFOsgh4kS/kNSWQ1aLHiGpKkcJLaorUvId0nJmvL2VXHOxclTU4oZCx9VK5WhgRq2E1ChHDy3KJaRAOXTMmLsj6FzXI9Tl0JngXDM2dK5uF91PZcUHN4vtMj3MO49oOdTM8L55ate7oSiH2qQuZrguzPWXH0NODsEZhaF27VpyqE0n/jQgNQEhOaTmsuF91NhFZw4qcuhMRAGRaUjIITILqXcwFWYiIYcg9xuKwt0KJl+OBYc+SPpkkuVIv/5dUs6hgofTTDkwY4TEKWXKAeKkyZH4QDxBZ0O5JmtWOXJkXe1h0hecsoAcOTTRzEYiCXKkPAQv0Tcjfm7RcsRfYSeCpxcthyb62UghVI5g8QepZUbkDEPlgFrEyRGp/Dgj2VBbedh64uQQZMSMlVlaDnhOkBxhJRyndDZi5hkkhxqlzQgjQo4YzVcjYKoRcqhhykbAPZBlOTlMZiyOuxwrP3neeM/WXQ4pyIaJheTADCsLyQFWfOXw3hTHOZYNnfU/wnWFvnKIcMwMWEIOOIbud4LN4kw2zvzsPa5bgAfNyzH37p6hnBmi3wkGIjiWI/1ZWSQbfnN2lCOXRcxwpa0cIvg91gH0lEMnG6XpKYcIpbPR89WKSDaqm9FQDhEzesC24kKDbHQrh0g2epjRSg4RMzrBtjKZNtnoUw6RbHQyo4kcmOEE2wo8pLwcZMMPRzkCblvAfzFC7lHDbwiOckB1Csvh98SYyM2GK4X/wHjuXTmm2tw1qFG4HOANcvyHbOziK8exoZdAZENxnbCvHF0RMcMb5IC+75Cex1rmRbIR8cGbdfTiSJnhPVu2FWBbmYFUNgKIKId3/c4wvjY1M8ZXfpgIOaAoQXIEaO7KgtmIeLXSADUzwggqhyYjPVvWjNByjNwJGCFskkuX4yUrZyO0HIc/Gc9C04ywbETLIUXklIsSva1UuSVkI6cc+n5gxkZ0OaAQOXKkx+PJAsjGhRw5ZF+5YMY1aXIIomlGIplypG8uJUicUqYcWZvL7rg1s5FohsSrldzr38CMXZLLAcpIyJEbD7LxCAk5Ig8fNyJixhNU5Ij0Q5zcjuq+zxE8F8FsBE/gOULl2AibDma8RE4OVz8u5mHGCIpyuPqhSVgvTeh+J9g2L49H3ON3HkZTiw3RclyYPjvMGEddjolbzHTPTqK2nnt0t5VrZm0xItnQ12Lj/ePz6+QTEInI3T1DFTPqybFRVJFCWtQ4kO5SbsoTT06RFNtWbiiRkIoqlzxz7CKrSF0t+shxQcSS6k5cqL2tqIWkjRYNy5F1ImnmROdyxOSkqxDXNNxWBjEdUFZQ4Z515YCXFPjgDbJADngIcgBygB3KAZQD7FAOoBxgh3IA5QA7lAMoB9ihHEA5wA7lAMoBdigHUA6wQzmAcoAdygGUA+xQDqAcYIdyAOUAO5QDKAfY+QdvgH6gaSZhxgAAAABJRU5ErkJggg==">
+<link rel="apple-touch-icon" id="touchIcon" href="">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap">
 <style>
@@ -617,6 +617,12 @@ $("tabMap").onclick = () => setMode("map");
 $("tabTrip").onclick = () => setMode("trip");
 $("handle").onclick = () => { const s = $("sheet"); s.className = s.classList.contains("small") ? (mode === "trip" ? "sheet tall" : "sheet") : "sheet small"; };
 $("fT2").onclick = () => { wantT2 = !wantT2; $("fT2").setAttribute("aria-pressed", wantT2); store.set("t2", wantT2 ? "1" : "0"); loadedBB = null; loadNear(true); };
+
+/* Icône d'écran d'accueil dessinée à la volée */
+try { const c = document.createElement("canvas"); c.width = c.height = 180; const g = c.getContext("2d");
+  g.fillStyle = "#12305a"; g.fillRect(0, 0, 180, 180); g.fillStyle = "#f5b82e"; g.beginPath(); g.arc(90, 90, 60, 0, 7); g.fill();
+  g.fillStyle = "#12305a"; g.beginPath(); [[100,42],[62,100],[88,100],[78,140],[120,80],[94,80]].forEach(([x,y],i) => i ? g.lineTo(x,y) : g.moveTo(x,y)); g.fill();
+  $("touchIcon").href = c.toDataURL("image/png"); } catch(e) {}
 
 loadNear(true);
 if (firstVisit) locateMe();
