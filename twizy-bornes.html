@@ -183,7 +183,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy</h1><div class="ver">Version 8 · 4 nov. 13 h 35</div></div>
+    <div><h1>Bornes Twizy</h1><div class="ver">Version 9 · 4 nov. 14 h 25</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -302,6 +302,8 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
+try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
 <script src="app.js?v=8"></script>
 
 </body>
