@@ -45,7 +45,7 @@ button{font:600 15px var(--f-body);border:0;border-radius:12px;cursor:pointer;co
 .tabs button[aria-selected="true"]{background:#fff;color:var(--night)}
 #mapBar{display:flex;flex-direction:column;gap:9px}
 .row{display:flex;gap:8px;position:relative}
-input[type=search],input[type=time]{width:100%;min-width:0;border:0;border-radius:12px;padding:0 14px;height:46px;font:inherit;font-size:16px;background:#fff;color:#172033;-webkit-appearance:none;appearance:none}
+input[type=search],input[type=time],input[type=text]{width:100%;min-width:0;border:0;border-radius:12px;padding:0 14px;height:46px;font:inherit;font-size:16px;background:#fff;color:#172033;-webkit-appearance:none;appearance:none}
 .chips{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;margin:0 -12px;padding:0 12px}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;background:rgba(255,255,255,.14);color:#fff;height:38px;padding:0 14px;border-radius:999px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -90,6 +90,14 @@ body.dragging .fab,body.dragging .sheet{transition:none}
 .tag.ef{background:var(--ef);color:#12305a}.tag.t2{background:var(--t2)}.tag.free{background:var(--ok)}.tag.h24{background:var(--night);color:#fff}
 .tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:5px}
 .star{color:var(--fav)}
+.tag.src{background:var(--field);color:var(--fg);border:1px solid var(--line)}
+.cmp{margin-top:16px;border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.cmp-h{font-weight:700;margin-bottom:8px}
+.cmp-h.one{color:var(--warn)}
+.cmp table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+.cmp th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);text-align:left;font-weight:700;padding:4px 6px 4px 0}
+.cmp td{padding:6px 6px 6px 0;border-top:1px solid var(--line)}
+.cmp td:not(:first-child),.cmp th:not(:first-child){text-align:center}
 
 /* Fiche borne */
 .d-addr{font-size:15px;color:var(--muted)}
@@ -115,6 +123,7 @@ body.dragging .fab,body.dragging .sheet{transition:none}
 .field{display:flex;flex-direction:column;gap:5px;position:relative}
 .field label,.set label{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 .field input{background:var(--field);color:var(--fg);border:1px solid var(--line)}
+.field small{color:var(--muted);font-size:12px}
 .quick{display:flex;gap:7px;flex-wrap:wrap}
 .quick button{height:40px;padding:0 14px;border-radius:999px;background:var(--field);border:1px solid var(--line);font-size:14px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .quick button[aria-pressed="true"]{background:var(--night);color:#fff;border-color:var(--night)}
@@ -188,6 +197,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
       <button type="button" class="chip" id="fT2" aria-pressed="false"><i class="dot" style="background:var(--t2)"></i>Type 2</button>
       <button type="button" class="chip" id="fFree" aria-pressed="false">Gratuites</button>
       <button type="button" class="chip" id="f24" aria-pressed="false">24 h/24</button>
+      <button type="button" class="chip" id="fConf" aria-pressed="false">✓ Confirmées</button>
       <button type="button" class="chip" id="fFav" aria-pressed="false">★ Favoris</button>
     </div>
   </div>
@@ -275,6 +285,11 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
             <input id="detour" type="range" min="1" max="8" step="1">
           </div>
           <label class="check"><input type="checkbox" id="useT2"> Utiliser aussi les bornes Type 2 (câble adaptateur)</label>
+          <div class="field">
+            <label for="ocmKey">Clé Open Charge Map (facultative)</label>
+            <input id="ocmKey" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Collez votre clé ici">
+            <small id="ocmNote">Ajoute une 3ᵉ source de bornes. Clé gratuite sur openchargemap.org. Elle reste sur votre téléphone.</small>
+          </div>
         </div>
       </details>
       <button type="submit" class="primary" id="calc">Calculer mon trajet</button>
@@ -287,15 +302,17 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
-/* Sources : base nationale IRVE (data.gouv.fr, identifiant retrouvé automatiquement), secours OpenStreetMap (Overpass).
+/* Sources comparées : base nationale IRVE (data.gouv.fr), OpenStreetMap (Overpass) et, avec une clé, Open Charge Map.
    Itinéraire : Valhalla, profil deux-roues motorisé (sans autoroutes ni voies express), secours OSRM.
-   Adresses : Géoplateforme IGN. Fond de carte : CARTO / OpenStreetMap. */
+   Adresses : Géoplateforme IGN. Fond de carte : OpenStreetMap. */
 const DATASET_API = "https://www.data.gouv.fr/api/1/datasets/5448d3e0c751df01f85d0572/";
 const TABULAR = id => "https://tabular-api.data.gouv.fr/api/resources/" + id + "/data/";
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
 const VALHALLA = ["https://valhalla1.openstreetmap.de/route", "https://valhalla.openstreetmap.de/route"];
 const OSRM = "https://router.project-osrm.org/route/v1/driving/";
 const GEOCODE = "https://data.geopf.fr/geocodage/";
+const OCM = "https://api.openchargemap.io/v3/";
+const SRC = {irve:"Base nationale", osm:"OpenStreetMap", ocm:"Open Charge Map"};
 const MIN_ZOOM = 11, CELL = 0.12, CELL_TTL = 3 * 864e5, PARALLEL = 4, OCELL = 0.36, OSM_TTL = 7 * 864e5;
 
 const $ = id => document.getElementById(id);
@@ -327,7 +344,7 @@ function prettyHours(h){
 const is24 = s => /24\s*\/\s*7|24\s*h?\s*\/\s*24|00:00\s*-\s*24:00|24h24|tous les jours.*24/i.test(s.hours || "");
 
 /* ---------- État ---------- */
-const F = Object.assign({t2:false, free:false, h24:false, fav:false}, jget("filters", {}));
+const F = Object.assign({t2:false, free:false, h24:false, fav:false, conf:false}, jget("filters", {}));
 let favs = jget("favs", {});
 let navApp = store.get("navApp") || "apple";
 let mode = "map", pane = "map", me = null, meMarker = null, detail = null, tripHead = null, lastMarkerTap = 0;
@@ -391,7 +408,7 @@ function groupIRVE(rows){
     if (s.seen.has(pid)) continue; s.seen.add(pid);
     if (truthy(r.prise_type_ef)) s.ef++; if (truthy(r.prise_type_2)) s.t2++;
   }
-  return [...by.values()];
+  return [...by.values()].map(s => tagSrc(s, "irve"));
 }
 async function osmStations(bb, t2){
   const b = [bb.s, bb.w, bb.n, bb.e].map(x => x.toFixed(5)).join(",");
@@ -406,10 +423,38 @@ async function osmStations(bb, t2){
         return {k:c.lat.toFixed(5)+","+c.lon.toFixed(5), lat:c.lat, lng:c.lon, name:t.name || t.operator || "Borne",
           addr:[t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" "), op:t.operator || t.network || "",
           hours:t.opening_hours || "", free:t.fee === "no" || /gratuit|free/i.test(t.charge || ""), price:t.charge || "", access:t.access || "",
-          ef: efv ? (+efv || 1) : 0, t2: t2v ? (+t2v || 1) : 0}; });
+          ef: efv ? (+efv || 1) : 0, t2: t2v ? (+t2v || 1) : 0}; }).map(s => tagSrc(s, "osm"));
     } catch(e) {}
   }
   throw new Error("OSM");
+}
+function tagSrc(s, id){ s.src = [id]; s.by = {[id]:{ef:s.ef, t2:s.t2, free:s.free}}; return s; }
+/* Open Charge Map : la liste des types de prises est lue chez eux, puis classée en E/F ou Type 2. */
+let ocmKey = store.get("ocmKey") || "", ocmRef = null, ocmErr = "";
+async function ocmRefData(){
+  if (ocmRef) return ocmRef;
+  const r = await fetch(OCM + "referencedata/?key=" + encodeURIComponent(ocmKey));
+  if (!r.ok) throw new Error(r.status === 401 || r.status === 403 ? "clé refusée" : "erreur " + r.status);
+  const j = await r.json(), ct = {}, ops = {}, ut = {};
+  (j.ConnectionTypes || []).forEach(c => { const t = (c.Title || "") + " " + (c.FormalName || "");
+    ct[c.ID] = /schuko|type ?e\b|cee ?7|french|domestic/i.test(t) ? "ef" : /type ?2|mennekes|62196-2/i.test(t) ? "t2" : ""; });
+  (j.Operators || []).forEach(o => ops[o.ID] = o.Title);
+  (j.UsageTypes || []).forEach(u => ut[u.ID] = u.Title);
+  return ocmRef = {ct, ops, ut};
+}
+async function ocmStations(bb){
+  const ref = await ocmRefData();
+  const lat = (bb.s + bb.n) / 2, lng = (bb.w + bb.e) / 2;
+  const r = await fetch(OCM + "poi/?output=json&compact=true&verbose=false&maxresults=1000&distanceunit=KM&distance=30&latitude=" + lat.toFixed(4) + "&longitude=" + lng.toFixed(4) + "&key=" + encodeURIComponent(ocmKey));
+  if (!r.ok) throw new Error("OCM " + r.status);
+  return (await r.json()).map(p => {
+    const a = p.AddressInfo || {}; let ef = 0, t2 = 0;
+    (p.Connections || []).forEach(c => { const k = ref.ct[c.ConnectionTypeID], q = c.Quantity || 1; if (k === "ef") ef += q; else if (k === "t2") t2 += q; });
+    return tagSrc({k:(+a.Latitude).toFixed(5) + "," + (+a.Longitude).toFixed(5), lat:+a.Latitude, lng:+a.Longitude, name:a.Title || "Borne",
+      addr:[a.AddressLine1, a.Postcode, a.Town].filter(Boolean).join(" "), op:ref.ops[p.OperatorID] || "", hours:"",
+      free:/free|gratuit/i.test(p.UsageCost || ""), price:p.UsageCost || "", access:ref.ut[p.UsageTypeID] || "", ef, t2}, "ocm");
+  }).filter(s => s.lat && s.lng && (s.ef || s.t2) && !/private|privé/i.test(s.access)
+    && s.lat >= bb.s && s.lat < bb.n && s.lng >= bb.w && s.lng < bb.e);
 }
 let sourceName = "", lastErr = "";
 async function stationsIn(bb, t2, maxPages){
@@ -425,7 +470,7 @@ async function stationsIn(bb, t2, maxPages){
     return list;
   }
 }
-const slim = s => ({k:s.k, lat:+s.lat.toFixed(6), lng:+s.lng.toFixed(6), name:s.name, addr:s.addr, op:s.op, hours:s.hours, free:s.free, price:s.price, access:s.access, ef:s.ef, t2:s.t2});
+const slim = s => ({k:s.k, lat:+s.lat.toFixed(6), lng:+s.lng.toFixed(6), name:s.name, addr:s.addr, op:s.op, hours:s.hours, free:s.free, price:s.price, access:s.access, ef:s.ef, t2:s.t2, src:s.src || [], by:s.by || {}});
 
 /* ---------- Chargement par zones, en parallèle, gardé en mémoire 3 jours ---------- */
 const cellsFor = (bb, size = CELL) => { const out = [];
@@ -433,7 +478,7 @@ const cellsFor = (bb, size = CELL) => { const out = [];
     for (let j = Math.floor(bb.w / size); j <= Math.floor(bb.e / size); j++) out.push([i, j]);
   return out; };
 const cellBB = (i, j) => ({s:i*CELL, n:(i+1)*CELL, w:j*CELL, e:(j+1)*CELL});
-const cellKey = (i, j, t2) => "c3:" + (t2 ? "t2:" : "") + i + "_" + j;
+const cellKey = (i, j, t2) => "c4:" + (t2 ? "t2:" : "") + i + "_" + j;
 const memCache = new Map(), inflight = new Map();
 let active = 0; const waiting = [];
 function slot(fn, wanted){
@@ -451,7 +496,7 @@ function cached(i, j, t2){
   return null;
 }
 function pruneCache(){
-  try { const ks = []; for (let n = 0; n < localStorage.length; n++){ const k = localStorage.key(n); if (k && k.startsWith("c3:")) ks.push(k); }
+  try { const ks = []; for (let n = 0; n < localStorage.length; n++){ const k = localStorage.key(n); if (k && /^(c4|o4|m4):/.test(k)) ks.push(k); }
     ks.forEach((k, n) => { if (n % 2 === 0) localStorage.removeItem(k); }); } catch(e) {}
 }
 function getCell(i, j, wanted = () => true){
@@ -470,49 +515,65 @@ function getCell(i, j, wanted = () => true){
   return p;
 }
 
-/* OpenStreetMap complète la base officielle (bornes ajoutées par les contributeurs), par grandes zones, en arrière-plan. */
-const oKey = (i, j) => "o3:" + i + "_" + j;
-const oMem = new Map(), oInflight = new Map(), oWaiting = [];
-let oActive = 0, osmPending = 0, osmUsed = false;
-function oslot(fn){
+/* Sources complémentaires (OpenStreetMap, Open Charge Map), par grandes zones, en arrière-plan. */
+const EXTRA = [
+  {id:"osm", prefix:"o4:", on:() => true, fetch:bb => osmStations(bb, true)},
+  {id:"ocm", prefix:"m4:", on:() => !!ocmKey, fetch:bb => ocmStations(bb)}
+];
+const xMem = new Map(), xInflight = new Map(), xWaiting = [], used = new Set();
+let xActive = 0, osmPending = 0;
+function xslot(fn){
   return new Promise((res, rej) => {
-    const run = () => { oActive++; fn().then(res, rej).finally(() => { oActive--; if (oWaiting.length) oWaiting.shift()(); }); };
-    oActive < 2 ? run() : oWaiting.push(run);
+    const run = () => { xActive++; fn().then(res, rej).finally(() => { xActive--; if (xWaiting.length) xWaiting.shift()(); }); };
+    xActive < 3 ? run() : xWaiting.push(run);
   });
 }
-function osmCached(i, j){
-  const k = oKey(i, j);
-  if (oMem.has(k)) return oMem.get(k);
+function xCached(src, i, j){
+  const k = src.prefix + i + "_" + j;
+  if (xMem.has(k)) return xMem.get(k);
   const o = jget(k, null);
-  if (o && Date.now() - o.t < OSM_TTL){ oMem.set(k, o.l); return o.l; }
+  if (o && Date.now() - o.t < OSM_TTL){ xMem.set(k, o.l); return o.l; }
   return null;
 }
-function getOsmCell(i, j){
-  const k = oKey(i, j), hit = osmCached(i, j);
+function getExtraCell(src, i, j){
+  const k = src.prefix + i + "_" + j, hit = xCached(src, i, j);
   if (hit) return Promise.resolve(hit);
-  if (oInflight.has(k)) return oInflight.get(k);
-  const p = oslot(async () => {
-    const list = (await osmStations({s:i*OCELL, n:(i+1)*OCELL, w:j*OCELL, e:(j+1)*OCELL}, true)).filter(s => s.ef || s.t2).map(slim);
-    oMem.set(k, list);
+  if (xInflight.has(k)) return xInflight.get(k);
+  const p = xslot(async () => {
+    const list = (await src.fetch({s:i*OCELL, n:(i+1)*OCELL, w:j*OCELL, e:(j+1)*OCELL})).filter(s => s.ef || s.t2).map(slim);
+    xMem.set(k, list);
     if (!jset(k, {t:Date.now(), l:list})){ pruneCache(); jset(k, {t:Date.now(), l:list}); }
     return list;
-  }).finally(() => oInflight.delete(k));
-  oInflight.set(k, p);
+  }).finally(() => xInflight.delete(k));
+  xInflight.set(k, p);
   return p;
 }
-function addOsm(list){ if (list && list.length){ osmUsed = true; addStations(list); } }
+function loadExtra(i, j, onDone){
+  for (const src of EXTRA){
+    if (!src.on()) continue;
+    const hit = xCached(src, i, j);
+    if (hit){ addExtra(hit); continue; }
+    osmPending++; setLoading(true);
+    getExtraCell(src, i, j).then(addExtra).catch(e => { if (src.id === "ocm"){ ocmErr = e.message; paintOcm(); } })
+      .finally(() => { osmPending--; setLoading(busy()); onDone && onDone(); });
+  }
+}
+function addExtra(list){ if (list && list.length){ list.forEach(s => (s.src || []).forEach(x => used.add(x))); addStations(list); } }
 const busy = () => pending + osmPending > 0;
-const sourcesLabel = () => [sourceName === "Base nationale IRVE" ? "base nationale" : "", osmUsed || sourceName === "OpenStreetMap" ? "OpenStreetMap" : ""].filter(Boolean).join(" + ");
+const sourcesLabel = () => [...used].map(x => SRC[x]).join(" + ");
+try { for (let n = localStorage.length - 1; n >= 0; n--){ const k = localStorage.key(n); if (k && /^(c3|o3):/.test(k)) localStorage.removeItem(k); } } catch(e) {}
 
 /* ---------- Bornes connues et marqueurs ---------- */
 const all = new Map(), markers = new Map();
 function addStations(list){
   for (const s of list){
+    (s.src || []).forEach(x => used.add(x));
     let o = all.get(s.k);
     // Même borne connue des deux sources : on garde une seule fiche, complétée.
-    if (!o) for (const x of all.values()) if (Math.abs(x.lat - s.lat) < 0.0006 && Math.abs(x.lng - s.lng) < 0.0009 && hav(x, s) < 0.06){ o = x; break; }
+    if (!o) for (const x of all.values()) if (Math.abs(x.lat - s.lat) < 0.0008 && Math.abs(x.lng - s.lng) < 0.0012 && hav(x, s) < 0.08){ o = x; break; }
     if (!o){ all.set(s.k, s); continue; }
     if (o === s) continue;
+    o.src = [...new Set([...(o.src || []), ...(s.src || [])])]; o.by = Object.assign({}, s.by, o.by);
     o.ef = Math.max(o.ef, s.ef); o.t2 = Math.max(o.t2, s.t2); o.free = o.free || s.free;
     for (const f of ["hours", "addr", "op", "price", "access"]) if (!o[f] && s[f]) o[f] = s[f];
     if ((!o.name || o.name === "Borne") && s.name) o.name = s.name;
@@ -520,7 +581,8 @@ function addStations(list){
 }
 Object.values(favs).forEach(s => all.set(s.k, s));
 const compatible = s => s.ef > 0 || (F.t2 && s.t2 > 0);
-const shown = s => compatible(s) && (!F.free || s.free) && (!F.h24 || is24(s)) && (!F.fav || favs[s.k]);
+const nsrc = s => (s.src || []).length;
+const shown = s => compatible(s) && (!F.free || s.free) && (!F.h24 || is24(s)) && (!F.fav || favs[s.k]) && (!F.conf || nsrc(s) >= 2);
 function markerFor(s){
   const fav = !!favs[s.k];
   return L.circleMarker([s.lat, s.lng], {renderer, radius: fav ? 10 : 8.5, weight: fav ? 3.5 : 2.5, color: fav ? COL.fav : "#fff", fillColor: s.ef ? COL.ef : COL.t2, fillOpacity:1})
@@ -562,12 +624,7 @@ function loadNear(){
       .catch(() => { failed++; })
       .finally(() => { pending--; setLoading(busy()); scheduleRender(); });
   }
-  for (const [i, j] of cellsFor({s:b.getSouth(), n:b.getNorth(), w:b.getWest(), e:b.getEast()}, OCELL).slice(0, 9)){
-    const hit = osmCached(i, j);
-    if (hit){ addOsm(hit); continue; }
-    osmPending++; setLoading(true);
-    getOsmCell(i, j).then(addOsm).catch(() => {}).finally(() => { osmPending--; setLoading(busy()); scheduleRender(); });
-  }
+  for (const [i, j] of cellsFor({s:b.getSouth(), n:b.getNorth(), w:b.getWest(), e:b.getEast()}, OCELL).slice(0, 9)) loadExtra(i, j, scheduleRender);
   scheduleRender();
 }
 map.on("moveend", () => { clearTimeout(loadTimer); loadTimer = setTimeout(loadNear, 120); });
@@ -579,7 +636,16 @@ map.on("click", () => {
 /* ---------- Liste ---------- */
 function tagsHTML(s){
   return (s.ef ? `<span class="tag ef">E/F ×${s.ef}</span>` : "") + (s.t2 ? `<span class="tag t2">Type 2 ×${s.t2}</span>` : "")
-    + (s.free ? `<span class="tag free">Gratuit</span>` : "") + (is24(s) ? `<span class="tag h24">24 h/24</span>` : ""); }
+    + (s.free ? `<span class="tag free">Gratuit</span>` : "") + (is24(s) ? `<span class="tag h24">24 h/24</span>` : "")
+    + (nsrc(s) >= 2 ? `<span class="tag src">✓ ${nsrc(s)} sources</span>` : ""); }
+function compareHTML(s){
+  const src = s.src || []; if (!src.length) return "";
+  const yes = v => v ? (v === true ? "oui" : v) : "–";
+  const rows = src.map(id => { const b = (s.by || {})[id] || {}; return `<tr><td>${SRC[id] || id}</td><td>${yes(b.ef)}</td><td>${yes(b.t2)}</td><td>${yes(b.free)}</td></tr>`; }).join("");
+  const missing = Object.keys(SRC).filter(id => !src.includes(id) && (id !== "ocm" || ocmKey)).map(id => SRC[id]);
+  const head = src.length >= 2 ? `<div class="cmp-h">✓ Confirmée par ${src.length} sources</div>` : `<div class="cmp-h one">Une seule source : à vérifier sur place</div>`;
+  return `<div class="cmp">${head}<table><thead><tr><th>Source</th><th>Prises E/F</th><th>Type 2</th><th>Gratuit</th></tr></thead><tbody>${rows}</tbody></table>${missing.length ? `<div class="note">Absente de : ${missing.join(", ")}.</div>` : ""}</div>`;
+}
 function renderList(msg){
   if (mode !== "map" || pane !== "map") return;
   const ref = me || map.getCenter(), view = map.getBounds();
@@ -591,7 +657,7 @@ function renderList(msg){
     : (me ? "Triées par distance de vous" : "Triées par distance du centre de la carte") + (sourcesLabel() ? " · " + sourcesLabel() : "") + (osmPending ? " · recherche d'autres bornes…" : ""));
   const frag = document.createDocumentFragment();
   if (!n && !pending){ const li = document.createElement("li"); li.className = "empty";
-    li.textContent = F.fav ? "Ouvrez une borne puis touchez « Favori » pour la retrouver ici." : F.free ? "Peu de bornes sont déclarées gratuites dans les données publiques. Dézoomez ou activez « Type 2 » pour en voir plus." : F.h24 ? "Essayez d'enlever le filtre ou de dézoomer." : "Déplacez la carte ou activez « Type 2 »."; frag.appendChild(li); }
+    li.textContent = F.fav ? "Ouvrez une borne puis touchez « Favori » pour la retrouver ici." : F.free ? "Peu de bornes sont déclarées gratuites dans les données publiques. Dézoomez ou activez « Type 2 » pour en voir plus." : F.h24 || F.conf ? "Essayez d'enlever un filtre ou de dézoomer." : "Déplacez la carte ou activez « Type 2 »."; frag.appendChild(li); }
   vis.slice(0, 50).forEach(s => {
     const li = document.createElement("li");
     li.innerHTML = `<i class="dot" style="width:14px;height:14px;background:${s.ef ? "var(--ef)" : "var(--t2)"}"></i>
@@ -689,6 +755,7 @@ function showDetail(s, from, extra){
     <dl class="info">${row("Opérateur", s.op)}${row("Horaires", prettyHours(s.hours))}${row("Tarif", s.free ? "Gratuit" : s.price)}${row("Accès", s.access)}
       ${row("Prises", [s.ef ? s.ef + " prise" + (s.ef > 1 ? "s" : "") + " E/F" : "", s.t2 ? s.t2 + " Type 2" : ""].filter(Boolean).join(" · "))}</dl>
     ${!s.ef ? `<div class="alert">Pas de prise domestique ici : il faut le câble adaptateur Type 2.</div>` : ""}
+    ${compareHTML(s)}
     <div class="note">Vérifiez que la borne est accessible avant de partir.</div>`;
   if ($("dTrip")) $("dTrip").onclick = () => tripTo(s);
   $("dFav").onclick = () => {
@@ -771,7 +838,7 @@ $("search").onsubmit = async e => { e.preventDefault(); const q = $("q").value.t
   try { const [p] = await geocode(q, 1); if (p) goTo(p); else $("hSub").textContent = "Lieu introuvable."; } catch(err){ $("hSub").textContent = err.message; } };
 
 /* ---------- Filtres ---------- */
-const chipFor = {t2:"fT2", free:"fFree", h24:"f24", fav:"fFav"};
+const chipFor = {t2:"fT2", free:"fFree", h24:"f24", conf:"fConf", fav:"fFav"};
 function paintFilters(){ for (const k in chipFor) $(chipFor[k]).setAttribute("aria-pressed", !!F[k]); $("useT2").checked = F.t2; }
 function toggleFilter(k, val){
   F[k] = val === undefined ? !F[k] : val; jset("filters", F); paintFilters();
@@ -781,6 +848,16 @@ function toggleFilter(k, val){
 }
 for (const k in chipFor) $(chipFor[k]).onclick = () => toggleFilter(k);
 $("useT2").onchange = () => toggleFilter("t2", $("useT2").checked);
+function paintOcm(){
+  $("ocmNote").textContent = !ocmKey ? "Ajoute une 3ᵉ source de bornes. Clé gratuite sur openchargemap.org. Elle reste sur votre téléphone."
+    : ocmErr ? "Open Charge Map : " + ocmErr + ". Vérifiez la clé." : "Open Charge Map activé ✓";
+}
+$("ocmKey").value = ocmKey; paintOcm();
+$("ocmKey").onchange = () => {
+  ocmKey = $("ocmKey").value.trim(); store.set("ocmKey", ocmKey); ocmRef = null; ocmErr = "";
+  for (const k of [...xMem.keys()]) if (k.startsWith("m4:")) xMem.delete(k);
+  paintOcm(); loadNear();
+};
 
 /* ---------- Réglages Twizy ---------- */
 const DEF = {soc:100, range:75, reserve:15, target:100, full:210, detour:3, model:"80"};
@@ -873,7 +950,7 @@ function corridorCells(sp, padKm){
 async function stationsAlong(sp, padKm, onProgress){
   const cells = corridorCells(sp, padKm); let done = 0, bad = 0;
   const ocells = new Map(); cells.forEach(([i, j]) => ocells.set(Math.floor(i / 3) + "_" + Math.floor(j / 3), [Math.floor(i / 3), Math.floor(j / 3)]));
-  const osmDone = Promise.allSettled([...ocells.values()].map(([i, j]) => getOsmCell(i, j).then(addOsm)));
+  const osmDone = Promise.allSettled([...ocells.values()].flatMap(([i, j]) => EXTRA.filter(x => x.on()).map(x => getExtraCell(x, i, j).then(addExtra))));
   await Promise.all(cells.map(async ([i, j]) => {
     try { let list = await getCell(i, j); if (!list) list = await getCell(i, j);
       if (list) addStations(list); }
@@ -882,7 +959,7 @@ async function stationsAlong(sp, padKm, onProgress){
   }));
   onProgress(-1, 0);
   await Promise.race([osmDone, sleep(15000)]);
-  if (bad === cells.length && cells.length && !osmUsed) throw new Error("Impossible de charger les bornes pour le moment. Réessayez dans un instant.");
+  if (bad === cells.length && cells.length && !used.size) throw new Error("Impossible de charger les bornes pour le moment. Réessayez dans un instant.");
   let s0 = Infinity, n0 = -Infinity, w0 = Infinity, e0 = -Infinity;
   sp.forEach(p => { s0 = Math.min(s0, p.lat); n0 = Math.max(n0, p.lat); w0 = Math.min(w0, p.lng); e0 = Math.max(e0, p.lng); });
   const padLat = padKm / 111 + 0.01, padLng = padKm / 70 + 0.01;
@@ -949,7 +1026,7 @@ $("tripForm").onsubmit = async e => {
     const directOk = r.km <= ((cfg.soc - cfg.reserve) / 100) * cfg.range;
     let cand = [], bad = 0;
     if (!directOk){ status("Recherche des bornes sur le trajet…");
-      ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status(d < 0 ? "Recherche d'autres bornes (OpenStreetMap)…" : "Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
+      ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status(d < 0 ? "Comparaison avec les autres sources…" : "Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
     const res = plan(r.km, cand);
     const speed = cfg.model === "45" ? 38 : 55;
     const driveMin = r.twizy ? Math.max(r.min * 1.1, r.km / (speed * 1.25) * 60) : Math.max(r.min, r.km / speed * 60);
