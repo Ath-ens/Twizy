@@ -292,11 +292,11 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
    Adresses : Géoplateforme IGN. Fond de carte : CARTO / OpenStreetMap. */
 const DATASET_API = "https://www.data.gouv.fr/api/1/datasets/5448d3e0c751df01f85d0572/";
 const TABULAR = id => "https://tabular-api.data.gouv.fr/api/resources/" + id + "/data/";
-const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
 const VALHALLA = ["https://valhalla1.openstreetmap.de/route", "https://valhalla.openstreetmap.de/route"];
 const OSRM = "https://router.project-osrm.org/route/v1/driving/";
 const GEOCODE = "https://data.geopf.fr/geocodage/";
-const MIN_ZOOM = 11, CELL = 0.12, CELL_TTL = 3 * 864e5, PARALLEL = 4;
+const MIN_ZOOM = 11, CELL = 0.12, CELL_TTL = 3 * 864e5, PARALLEL = 4, OCELL = 0.36, OSM_TTL = 7 * 864e5;
 
 const $ = id => document.getElementById(id);
 const root = document.documentElement;
@@ -386,7 +386,7 @@ function groupIRVE(rows){
     const k = lat.toFixed(5) + "," + lng.toFixed(5);
     let s = by.get(k);
     if (!s){ s = {k, lat, lng, name:r.nom_station || r.nom_enseigne || "Borne", addr:r.adresse_station || "", op:r.nom_operateur || r.nom_enseigne || "",
-      hours:r.horaires || "", free:truthy(r.gratuit), price:r.tarification || "", access:r.condition_acces || "", ef:0, t2:0, seen:new Set()}; by.set(k, s); }
+      hours:r.horaires || "", free:truthy(r.gratuit) || /gratuit/i.test(r.tarification || ""), price:r.tarification || "", access:r.condition_acces || "", ef:0, t2:0, seen:new Set()}; by.set(k, s); }
     const pid = r.id_pdc_itinerance || r.id_pdc_local || r.__id || s.seen.size;
     if (s.seen.has(pid)) continue; s.seen.add(pid);
     if (truthy(r.prise_type_ef)) s.ef++; if (truthy(r.prise_type_2)) s.t2++;
@@ -395,16 +395,17 @@ function groupIRVE(rows){
 }
 async function osmStations(bb, t2){
   const b = [bb.s, bb.w, bb.n, bb.e].map(x => x.toFixed(5)).join(",");
-  const q = `[out:json][timeout:25];(nwr["amenity"="charging_station"]["socket:schuko"](${b});nwr["amenity"="charging_station"]["socket:typee"](${b});${t2 ? `nwr["amenity"="charging_station"]["socket:type2"](${b});` : ""});out center tags;`;
+  const q = `[out:json][timeout:25];(nwr["amenity"="charging_station"]["socket:schuko"](${b});nwr["amenity"="charging_station"]["socket:typee"](${b});${t2 ? `nwr["amenity"="charging_station"]["socket:type2"](${b});nwr["amenity"="charging_station"]["socket:type2_cable"](${b});` : ""});out center tags;`;
   for (const u of OVERPASS){
     try {
-      const r = await fetch(u + "?data=" + encodeURIComponent(q));
+      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 25000);
+      const r = await fetch(u + "?data=" + encodeURIComponent(q), {signal:ctl.signal}).finally(() => clearTimeout(to));
       if (!r.ok) continue;
       return (await r.json()).elements.map(e => { const t = e.tags || {}, c = e.center || e;
-        const efv = t["socket:schuko"] || t["socket:typee"], t2v = t["socket:type2"];
+        const efv = t["socket:schuko"] || t["socket:typee"], t2v = t["socket:type2"] || t["socket:type2_cable"];
         return {k:c.lat.toFixed(5)+","+c.lon.toFixed(5), lat:c.lat, lng:c.lon, name:t.name || t.operator || "Borne",
           addr:[t["addr:housenumber"], t["addr:street"], t["addr:city"]].filter(Boolean).join(" "), op:t.operator || t.network || "",
-          hours:t.opening_hours || "", free:t.fee === "no", price:t.charge || "", access:t.access || "",
+          hours:t.opening_hours || "", free:t.fee === "no" || /gratuit|free/i.test(t.charge || ""), price:t.charge || "", access:t.access || "",
           ef: efv ? (+efv || 1) : 0, t2: t2v ? (+t2v || 1) : 0}; });
     } catch(e) {}
   }
@@ -427,9 +428,9 @@ async function stationsIn(bb, t2, maxPages){
 const slim = s => ({k:s.k, lat:+s.lat.toFixed(6), lng:+s.lng.toFixed(6), name:s.name, addr:s.addr, op:s.op, hours:s.hours, free:s.free, price:s.price, access:s.access, ef:s.ef, t2:s.t2});
 
 /* ---------- Chargement par zones, en parallèle, gardé en mémoire 3 jours ---------- */
-const cellsFor = bb => { const out = [];
-  for (let i = Math.floor(bb.s / CELL); i <= Math.floor(bb.n / CELL); i++)
-    for (let j = Math.floor(bb.w / CELL); j <= Math.floor(bb.e / CELL); j++) out.push([i, j]);
+const cellsFor = (bb, size = CELL) => { const out = [];
+  for (let i = Math.floor(bb.s / size); i <= Math.floor(bb.n / size); i++)
+    for (let j = Math.floor(bb.w / size); j <= Math.floor(bb.e / size); j++) out.push([i, j]);
   return out; };
 const cellBB = (i, j) => ({s:i*CELL, n:(i+1)*CELL, w:j*CELL, e:(j+1)*CELL});
 const cellKey = (i, j, t2) => "c3:" + (t2 ? "t2:" : "") + i + "_" + j;
@@ -469,11 +470,53 @@ function getCell(i, j, wanted = () => true){
   return p;
 }
 
+/* OpenStreetMap complète la base officielle (bornes ajoutées par les contributeurs), par grandes zones, en arrière-plan. */
+const oKey = (i, j) => "o3:" + i + "_" + j;
+const oMem = new Map(), oInflight = new Map(), oWaiting = [];
+let oActive = 0, osmPending = 0, osmUsed = false;
+function oslot(fn){
+  return new Promise((res, rej) => {
+    const run = () => { oActive++; fn().then(res, rej).finally(() => { oActive--; if (oWaiting.length) oWaiting.shift()(); }); };
+    oActive < 2 ? run() : oWaiting.push(run);
+  });
+}
+function osmCached(i, j){
+  const k = oKey(i, j);
+  if (oMem.has(k)) return oMem.get(k);
+  const o = jget(k, null);
+  if (o && Date.now() - o.t < OSM_TTL){ oMem.set(k, o.l); return o.l; }
+  return null;
+}
+function getOsmCell(i, j){
+  const k = oKey(i, j), hit = osmCached(i, j);
+  if (hit) return Promise.resolve(hit);
+  if (oInflight.has(k)) return oInflight.get(k);
+  const p = oslot(async () => {
+    const list = (await osmStations({s:i*OCELL, n:(i+1)*OCELL, w:j*OCELL, e:(j+1)*OCELL}, true)).filter(s => s.ef || s.t2).map(slim);
+    oMem.set(k, list);
+    if (!jset(k, {t:Date.now(), l:list})){ pruneCache(); jset(k, {t:Date.now(), l:list}); }
+    return list;
+  }).finally(() => oInflight.delete(k));
+  oInflight.set(k, p);
+  return p;
+}
+function addOsm(list){ if (list && list.length){ osmUsed = true; addStations(list); } }
+const busy = () => pending + osmPending > 0;
+const sourcesLabel = () => [sourceName === "Base nationale IRVE" ? "base nationale" : "", osmUsed || sourceName === "OpenStreetMap" ? "OpenStreetMap" : ""].filter(Boolean).join(" + ");
+
 /* ---------- Bornes connues et marqueurs ---------- */
 const all = new Map(), markers = new Map();
 function addStations(list){
-  for (const s of list){ const o = all.get(s.k);
-    if (!o) all.set(s.k, s); else { o.ef = Math.max(o.ef, s.ef); o.t2 = Math.max(o.t2, s.t2); } }
+  for (const s of list){
+    let o = all.get(s.k);
+    // Même borne connue des deux sources : on garde une seule fiche, complétée.
+    if (!o) for (const x of all.values()) if (Math.abs(x.lat - s.lat) < 0.0006 && Math.abs(x.lng - s.lng) < 0.0009 && hav(x, s) < 0.06){ o = x; break; }
+    if (!o){ all.set(s.k, s); continue; }
+    if (o === s) continue;
+    o.ef = Math.max(o.ef, s.ef); o.t2 = Math.max(o.t2, s.t2); o.free = o.free || s.free;
+    for (const f of ["hours", "addr", "op", "price", "access"]) if (!o[f] && s[f]) o[f] = s[f];
+    if ((!o.name || o.name === "Borne") && s.name) o.name = s.name;
+  }
 }
 Object.values(favs).forEach(s => all.set(s.k, s));
 const compatible = s => s.ef > 0 || (F.t2 && s.t2 > 0);
@@ -517,7 +560,13 @@ function loadNear(){
     getCell(i, j, () => myWanted === wanted && wanted.has(key))
       .then(list => { if (list) addStations(list); })
       .catch(() => { failed++; })
-      .finally(() => { pending--; setLoading(pending > 0); scheduleRender(); });
+      .finally(() => { pending--; setLoading(busy()); scheduleRender(); });
+  }
+  for (const [i, j] of cellsFor({s:b.getSouth(), n:b.getNorth(), w:b.getWest(), e:b.getEast()}, OCELL).slice(0, 9)){
+    const hit = osmCached(i, j);
+    if (hit){ addOsm(hit); continue; }
+    osmPending++; setLoading(true);
+    getOsmCell(i, j).then(addOsm).catch(() => {}).finally(() => { osmPending--; setLoading(busy()); scheduleRender(); });
   }
   scheduleRender();
 }
@@ -539,10 +588,10 @@ function renderList(msg){
   const n = vis.length;
   $("hTitle").textContent = F.fav ? (n ? plural(n, "favori") : "Aucun favori") : map.getZoom() < MIN_ZOOM ? "Rapprochez la carte" : (n ? n + (n > 1 ? " bornes compatibles" : " borne compatible") : (pending ? "Recherche des bornes…" : "Aucune borne compatible ici"));
   $("hSub").textContent = msg || (failed && !n ? "Données indisponibles (" + (lastErr || "réseau") + "). Bougez la carte pour réessayer."
-    : (me ? "Triées par distance de vous" : "Triées par distance du centre de la carte") + (sourceName ? " · " + sourceName : ""));
+    : (me ? "Triées par distance de vous" : "Triées par distance du centre de la carte") + (sourcesLabel() ? " · " + sourcesLabel() : "") + (osmPending ? " · recherche d'autres bornes…" : ""));
   const frag = document.createDocumentFragment();
   if (!n && !pending){ const li = document.createElement("li"); li.className = "empty";
-    li.textContent = F.fav ? "Ouvrez une borne puis touchez « Favori » pour la retrouver ici." : (F.free || F.h24 ? "Essayez d'enlever un filtre ou de dézoomer." : "Déplacez la carte ou activez « Type 2 »."); frag.appendChild(li); }
+    li.textContent = F.fav ? "Ouvrez une borne puis touchez « Favori » pour la retrouver ici." : F.free ? "Peu de bornes sont déclarées gratuites dans les données publiques. Dézoomez ou activez « Type 2 » pour en voir plus." : F.h24 ? "Essayez d'enlever le filtre ou de dézoomer." : "Déplacez la carte ou activez « Type 2 »."; frag.appendChild(li); }
   vis.slice(0, 50).forEach(s => {
     const li = document.createElement("li");
     li.innerHTML = `<i class="dot" style="width:14px;height:14px;background:${s.ef ? "var(--ef)" : "var(--t2)"}"></i>
@@ -681,7 +730,7 @@ async function locateMe(){
   setLoading(true);
   try { const p = await getPos(); if (detail) closeDetail(); map.setView([p.lat, p.lng], Math.max(map.getZoom(), 14)); }
   catch(e){ $("hSub").textContent = e.message + ". Cherchez une ville à la place."; }
-  finally { setLoading(pending > 0); }
+  finally { setLoading(busy()); }
 }
 $("loc").onclick = locateMe;
 
@@ -822,16 +871,24 @@ function corridorCells(sp, padKm){
   return [...cells.values()];
 }
 async function stationsAlong(sp, padKm, onProgress){
-  const cells = corridorCells(sp, padKm), found = new Map(); let done = 0, bad = 0;
+  const cells = corridorCells(sp, padKm); let done = 0, bad = 0;
+  const ocells = new Map(); cells.forEach(([i, j]) => ocells.set(Math.floor(i / 3) + "_" + Math.floor(j / 3), [Math.floor(i / 3), Math.floor(j / 3)]));
+  const osmDone = Promise.allSettled([...ocells.values()].map(([i, j]) => getOsmCell(i, j).then(addOsm)));
   await Promise.all(cells.map(async ([i, j]) => {
     try { let list = await getCell(i, j); if (!list) list = await getCell(i, j);
-      if (list){ list.forEach(s => found.set(s.k, s)); addStations(list); } }
+      if (list) addStations(list); }
     catch(e){ bad++; }
     onProgress(++done, cells.length);
   }));
-  if (bad === cells.length && cells.length) throw new Error("Impossible de charger les bornes pour le moment. Réessayez dans un instant.");
+  onProgress(-1, 0);
+  await Promise.race([osmDone, sleep(15000)]);
+  if (bad === cells.length && cells.length && !osmUsed) throw new Error("Impossible de charger les bornes pour le moment. Réessayez dans un instant.");
+  let s0 = Infinity, n0 = -Infinity, w0 = Infinity, e0 = -Infinity;
+  sp.forEach(p => { s0 = Math.min(s0, p.lat); n0 = Math.max(n0, p.lat); w0 = Math.min(w0, p.lng); e0 = Math.max(e0, p.lng); });
+  const padLat = padKm / 111 + 0.01, padLng = padKm / 70 + 0.01;
   const res = [];
-  for (const s of found.values()){
+  for (const s of all.values()){
+    if (s.lat < s0 - padLat || s.lat > n0 + padLat || s.lng < w0 - padLng || s.lng > e0 + padLng) continue;
     if (!compatible(s)) continue;
     let best = Infinity, km = 0;
     for (const p of sp){ if (Math.abs(p.lat - s.lat) > 0.1) continue; const d = hav(p, s); if (d < best){ best = d; km = p.km; } }
@@ -892,7 +949,7 @@ $("tripForm").onsubmit = async e => {
     const directOk = r.km <= ((cfg.soc - cfg.reserve) / 100) * cfg.range;
     let cand = [], bad = 0;
     if (!directOk){ status("Recherche des bornes sur le trajet…");
-      ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status("Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
+      ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status(d < 0 ? "Recherche d'autres bornes (OpenStreetMap)…" : "Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
     const res = plan(r.km, cand);
     const speed = cfg.model === "45" ? 38 : 55;
     const driveMin = r.twizy ? Math.max(r.min * 1.1, r.km / (speed * 1.25) * 60) : Math.max(r.min, r.km / speed * 60);
@@ -949,7 +1006,7 @@ $("tripForm").onsubmit = async e => {
   } catch(err) {
     $("hSub").textContent = err.message;
     out.innerHTML = `<div class="alert">${esc(err.message)}</div>`; out.hidden = false;
-  } finally { btn.disabled = false; btn.textContent = "Calculer mon trajet"; tripBusy = false; setLoading(pending > 0); }
+  } finally { btn.disabled = false; btn.textContent = "Calculer mon trajet"; tripBusy = false; setLoading(busy()); }
 };
 
 /* ---------- Onglets ---------- */
