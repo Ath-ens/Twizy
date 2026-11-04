@@ -1,5 +1,5 @@
 /* Sources comparées : base nationale IRVE (data.gouv.fr), OpenStreetMap (Overpass) et, avec une clé, Open Charge Map.
-   Itinéraire : Valhalla, profil deux-roues motorisé (sans autoroutes ni voies express), secours OSRM.
+   Itinéraire : Valhalla, profil deux-roues motorisé limité à 45 km/h (Twizy 45, sans autoroutes ni voies express), secours OSRM.
    Adresses : Géoplateforme IGN. Fond de carte : OpenStreetMap. */
 const DATASET_API = "https://www.data.gouv.fr/api/1/datasets/5448d3e0c751df01f85d0572/";
 const TABULAR = id => "https://tabular-api.data.gouv.fr/api/resources/" + id + "/data/";
@@ -608,7 +608,7 @@ $("ocmKey").onchange = () => {
 };
 
 /* ---------- Réglages Twizy ---------- */
-const DEF = {soc:100, range:75, reserve:15, target:100, full:210, detour:3, model:"80", wx:true, priceDef:0.35};
+const DEF = {soc:100, range:75, reserve:15, target:100, full:210, detour:3, wx:true, priceDef:0.35};
 const cfg = Object.assign({}, DEF, jget("cfg", {}));
 const saveCfg = () => jset("cfg", cfg);
 const outFmt = {soc:v => v + " %", range:v => v + " km", reserve:v => v + " %", target:v => v + " %", full:v => fmtH(v), detour:v => v + " km", priceDef:v => v.toFixed(2).replace(".", ",") + " €/kWh"};
@@ -619,8 +619,7 @@ for (const k of Object.keys(outFmt)){
 }
 document.querySelectorAll("[data-set]").forEach(b => b.onclick = () => {
   const k = b.dataset.set, v = +b.dataset.v; cfg[k] = v; $(k).value = v; $(k + "Out").textContent = outFmt[k](v); saveCfg(); paintQuick(); });
-function setModel(m){ cfg.model = m; $("m45").setAttribute("aria-pressed", m === "45"); $("m80").setAttribute("aria-pressed", m === "80"); saveCfg(); }
-$("m45").onclick = () => setModel("45"); $("m80").onclick = () => setModel("80"); setModel(cfg.model); paintQuick();
+delete cfg.model; saveCfg(); paintQuick();
 $("wx").checked = cfg.wx; $("wx").onchange = () => { cfg.wx = $("wx").checked; saveCfg(); };
 
 /* ---------- Suivi de recharge ---------- */
@@ -711,7 +710,7 @@ function decode6(str){
 }
 async function route(a, b){
   const body = {locations:[{lat:a.lat, lon:a.lng}, {lat:b.lat, lon:b.lng}], costing:"motor_scooter",
-    costing_options:{motor_scooter:{top_speed: cfg.model === "45" ? 45 : 80, use_highways:0, use_primary:0.5, use_hills:0.3}},
+    costing_options:{motor_scooter:{top_speed:45, use_highways:0, use_primary:0.2, use_hills:0.3}},
     units:"kilometers", directions_type:"none"};
   for (const u of VALHALLA){
     try {
@@ -842,8 +841,8 @@ $("tripForm").onsubmit = async e => {
     if (!directOk){ status("Recherche des bornes sur le trajet…");
       ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status(d < 0 ? "Comparaison avec les autres sources…" : "Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
     const res = plan(r.km, cand);
-    const speed = cfg.model === "45" ? 38 : 55;
-    const driveMin = r.twizy ? Math.max(r.min * 1.1, r.km / (speed * 1.25) * 60) : Math.max(r.min, r.km / speed * 60);
+    const speed = 36; // moyenne réaliste d'une Twizy 45 (villages, ronds-points, côtes)
+    const driveMin = Math.max(r.min * 1.1, r.km / speed * 60);
     const minPerKm = driveMin / Math.max(r.km, 0.1);
     let t = dep.getTime(), prevKm = 0, back = 0;
     res.stops.forEach(x => { x.arrT = t + ((x.s.km - prevKm) + back + x.s.detour) * minPerKm * 6e4; x.leaveT = x.arrT + x.minutes * 6e4; t = x.leaveT; prevKm = x.s.km; back = x.s.detour; });
