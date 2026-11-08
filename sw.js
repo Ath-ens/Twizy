@@ -13,7 +13,7 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   const u = new URL(req.url);
   if (u.hostname.endsWith("basemaps.cartocdn.com") || u.hostname === "tile.openstreetmap.org") { e.respondWith(tile(req)); return; }
-  if (u.hostname === "cdnjs.cloudflare.com" || u.hostname === "fonts.googleapis.com" || u.hostname === "fonts.gstatic.com") { e.respondWith(cacheFirst(req)); return; }
+  if (u.hostname === "cdnjs.cloudflare.com" || u.hostname === "cdn.jsdelivr.net" || u.hostname === "fonts.googleapis.com" || u.hostname === "fonts.gstatic.com") { e.respondWith(cacheFirst(req)); return; }
   if (u.origin === self.location.origin) { e.respondWith(networkFirst(req)); return; }
 });
 
