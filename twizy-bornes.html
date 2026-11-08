@@ -197,7 +197,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 11 · 4 nov. 18 h 30</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 12 · 8 nov. 12 h 45</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -205,7 +205,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
   </div>
   <div id="mapBar">
     <form class="row" id="search">
-      <input id="q" type="search" placeholder="Chercher une ville, une adresse…" autocomplete="off" enterkeyhint="search">
+      <input id="q" type="search" placeholder="Ville, lieu, rue… (ex. lycée, Leclerc)" autocomplete="off" enterkeyhint="search">
       <ul class="sugg" id="qSugg" hidden></ul>
     </form>
     <div class="chips">
@@ -246,7 +246,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
         <button type="button" class="swap" id="swap" aria-label="Inverser départ et arrivée">⇅</button>
         <div class="field">
           <label for="to">Arrivée</label>
-          <input id="to" type="search" placeholder="Ville ou adresse" autocomplete="off">
+          <input id="to" type="search" placeholder="Ville, lieu ou rue" autocomplete="off">
           <ul class="sugg" id="toSugg" hidden></ul>
         </div>
       </div>
@@ -344,7 +344,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=11"></script>
+<script src="app.js?v=12"></script>
 
 </body>
 </html>
