@@ -84,7 +84,9 @@ let mode = "map", pane = "map", me = null, meMarker = null, detail = null, tripH
 const firstVisit = !store.get("view");
 const start = jget("view", null) || {lat:46.6705, lng:-1.4260, z:13};
 if (start.z < MIN_ZOOM) start.z = 12;
-const map = L.map("map", {zoomControl:false, attributionControl:false, preferCanvas:true, bounceAtZoomLimits:false}).setView([start.lat, start.lng], start.z);
+const map = L.map("map", {zoomControl:false, attributionControl:false, preferCanvas:true, bounceAtZoomLimits:false,
+  rotate:true, touchRotate:false, rotateControl:false, bearing:0}).setView([start.lat, start.lng], start.z);
+const canRotate = typeof map.setBearing === "function"; // extension leaflet-rotate chargée ?
 L.control.attribution({position:"topright", prefix:false}).addTo(map);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, keepBuffer:6, updateWhenZooming:false,
   attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map);
@@ -1028,8 +1030,9 @@ async function startGuide(){
     document.body.classList.add("guiding"); $("guide").hidden = false; $("gCard").hidden = true;
     tripLayer.remove(); nearLayer.remove(); gLayer.addTo(map); drawGuide();
     if (gMe) gMe.remove();
-    gMe = L.circleMarker([p.lat, p.lng], {renderer, radius:10, color:"#fff", weight:4, fillColor:"#1a73e8", fillOpacity:1, interactive:false}).addTo(map);
-    map.setView([p.lat, p.lng], 17);
+    gMe = L.marker([p.lat, p.lng], {interactive:false, zIndexOffset:1000, icon:L.divIcon({className:"", iconSize:[44, 44], iconAnchor:[22, 24],
+      html:'<div class="g-me"><svg viewBox="0 0 44 44" width="44" height="44"><path d="M22 4 L37 38 L22 29 L7 38 Z" fill="#1a73e8" stroke="#fff" stroke-width="3.5" stroke-linejoin="round"/></svg></div>'})}).addTo(map);
+    map.setView([p.lat, p.lng], 17); paintNorth();
     try { G.wake = await navigator.wakeLock.request("screen"); } catch(e) {}
     G.watch = navigator.geolocation.watchPosition(onGuidePos, () => { $("gIns").textContent = "Position GPS perdue…"; }, {enableHighAccuracy:true, maximumAge:1000, timeout:15000});
     onGuidePos({coords:{latitude:p.lat, longitude:p.lng}});
@@ -1042,6 +1045,7 @@ function stopGuide(){
   try { G.wake && G.wake.release(); } catch(e) {}
   try { speechSynthesis.cancel(); } catch(e) {}
   G = null; gLayer.remove(); if (gMe){ gMe.remove(); gMe = null; }
+  if (canRotate) map.setBearing(0);
   document.body.classList.remove("guiding"); $("guide").hidden = true;
   tripLayer.addTo(map); setMode("trip");
 }
@@ -1072,10 +1076,13 @@ function arrived(){
 function onGuidePos(pos){
   if (!G || G.busy) return;
   const p = {lat:pos.coords.latitude, lng:pos.coords.longitude};
-  if (gMe) gMe.setLatLng([p.lat, p.lng]);
-  if (G.follow) map.panTo([p.lat, p.lng], {animate:true});
-  if (G.paused) return;
   const leg = G.legs[0], s = snap(leg, p, G.idx), total = leg.cum[leg.cum.length - 1];
+  // Direction : celle de la route devant nous (stable), sinon celle donnée par le GPS quand on roule.
+  let hd = null;
+  if (!G.paused && s.d <= 0.05) hd = bearingDeg(pointAt(leg, s.along), pointAt(leg, Math.min(total, s.along + 0.04)));
+  if (hd == null && pos.coords.heading != null && !isNaN(pos.coords.heading) && (pos.coords.speed || 0) > 1.5) hd = pos.coords.heading;
+  updateView(p, hd);
+  if (G.paused) return;
   if (s.d > 0.05){ if (++G.off >= 3) { reroute(p); return; } } else { G.off = 0; G.idx = s.i; }
   if (hav(p, G.targets[0]) < 0.04 || total - s.along < 0.03){ arrived(); return; }
   const m = leg.man.find(m => m.type > 3 && leg.cum[m.begin_shape_index] > s.along + 0.005) || leg.man[leg.man.length - 1];
@@ -1099,11 +1106,38 @@ function onGuidePos(pos){
   $("gEta").textContent = fmtClock(Date.now() + (rem / 36 * 60 + chargeLeft) * 6e4, Date.now());
   $("gRem").textContent = fmtDist(rem) + (G.targets[0].stop ? " · borne dans " + fmtDist(total - s.along) : "");
 }
+/* Carte orientée dans le sens de la route (comme Plans ou Waze), ou nord en haut au choix. */
+let gNorthUp = store.get("gNorthUp") === "1";
+function bearingDeg(a, b){ const r = Math.PI / 180, dl = (b.lng - a.lng) * r;
+  const y = Math.sin(dl) * Math.cos(b.lat * r), x = Math.cos(a.lat * r) * Math.sin(b.lat * r) - Math.sin(a.lat * r) * Math.cos(b.lat * r) * Math.cos(dl);
+  return (Math.atan2(y, x) / r + 360) % 360; }
+function pointAt(leg, along){
+  let i = 0; while (i < leg.cum.length - 2 && leg.cum[i + 1] < along) i++;
+  const a = leg.pts[i], b = leg.pts[i + 1] || a, seg = (leg.cum[i + 1] || 0) - leg.cum[i], t = seg ? Math.max(0, Math.min(1, (along - leg.cum[i]) / seg)) : 0;
+  return {lat:a.lat + (b.lat - a.lat) * t, lng:a.lng + (b.lng - a.lng) * t};
+}
+function destPoint(p, brg, km){ const R = 6371, r = Math.PI / 180, d = km / R, la = p.lat * r, t = brg * r;
+  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(t));
+  return {lat:la2 / r, lng:p.lng + Math.atan2(Math.sin(t) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2)) / r}; }
+function updateView(p, hd){
+  if (hd != null){ if (G.bear == null) G.bear = hd; else { const d = ((hd - G.bear + 540) % 360) - 180; G.bear = (G.bear + d * 0.6 + 360) % 360; } }
+  const b = G.bear || 0, headUp = canRotate && !gNorthUp;
+  if (gMe){ gMe.setLatLng([p.lat, p.lng]); const el = gMe.getElement && gMe.getElement(); if (el && el.firstChild) el.firstChild.style.transform = "rotate(" + (headUp ? 0 : b) + "deg)"; }
+  if (canRotate) map.setBearing(headUp ? 360 - b : 0);
+  if (G.follow){
+    // Position affichée un peu plus bas que le centre pour voir plus loin devant.
+    const z = map.getZoom(), ahead = innerHeight * 0.2 * 156543.03 * Math.cos(p.lat * Math.PI / 180) / Math.pow(2, z) / 1000;
+    const c = headUp ? destPoint(p, b, ahead) : p;
+    map.setView([c.lat, c.lng], z, {animate:true});
+  }
+}
+function paintNorth(){ $("gNorth").hidden = !canRotate; $("gNorth").textContent = gNorthUp ? "N↑" : "🧭"; $("gNorth").setAttribute("aria-label", gNorthUp ? "Carte nord en haut" : "Carte dans le sens de la route"); }
+$("gNorth").onclick = () => { gNorthUp = !gNorthUp; store.set("gNorthUp", gNorthUp ? "1" : "0"); paintNorth(); if (G && gMe){ const ll = gMe.getLatLng(); updateView({lat:ll.lat, lng:ll.lng}, null); } };
 $("gStop").onclick = stopGuide;
 $("gMute").onclick = () => { gMuted = !gMuted; store.set("gMuted", gMuted ? "1" : "0"); $("gMute").textContent = gMuted ? "🔇" : "🔊"; if (gMuted) try { speechSynthesis.cancel(); } catch(e) {} };
 $("gMute").textContent = gMuted ? "🔇" : "🔊";
 map.on("dragstart", () => { if (G){ G.follow = false; $("gRecenter").hidden = false; } });
-$("gRecenter").onclick = () => { if (!G) return; G.follow = true; $("gRecenter").hidden = true; if (gMe) map.setView(gMe.getLatLng(), 17); };
+$("gRecenter").onclick = () => { if (!G) return; G.follow = true; $("gRecenter").hidden = true; if (gMe){ map.setZoom(17, {animate:false}); const ll = gMe.getLatLng(); updateView({lat:ll.lat, lng:ll.lng}, null); } };
 
 /* ---------- Onglets ---------- */
 function setMode(m){
