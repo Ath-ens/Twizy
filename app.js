@@ -550,16 +550,54 @@ async function locateMe(){
 $("loc").onclick = locateMe;
 
 /* ---------- Adresses avec suggestions ---------- */
+/* Trois recherches en parallèle : adresses et lieux IGN, lieux OpenStreetMap (Photon : écoles, magasins, mairies…). */
+const PHOTON = "https://photon.komoot.io/api/";
+const STOP = new Set(["de","du","des","la","le","les","l","d","a","au","aux","sur","en","et","rue","avenue","av","bd","boulevard","place","chemin","route","allee","impasse"]);
+const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const first = v => Array.isArray(v) ? v[0] : v;
+async function getFeatures(url, fn){
+  try {
+    const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 6000);
+    const r = await fetch(url, {signal:ctl.signal}).finally(() => clearTimeout(to));
+    if (!r.ok) return [];
+    return ((await r.json()).features || []).map(fn).filter(Boolean);
+  } catch(e){ return []; }
+}
+const PHOTON_SKIP = /^(highway|place|boundary|landuse|natural|waterway)$/;
 async function geocode(q, limit = 5){
-  const c = me || map.getCenter();
-  const r = await fetch(GEOCODE + "search?limit=10&lat=" + c.lat.toFixed(4) + "&lon=" + c.lng.toFixed(4) + "&q=" + encodeURIComponent(q));
-  if (!r.ok) throw new Error("Recherche d'adresse impossible");
-  const list = ((await r.json()).features || []).map(f => ({label:f.properties.label, ctx:f.properties.context || "", type:f.properties.type,
-    score:f.properties.score || 0, lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]}));
-  const top = Math.max(0, ...list.map(p => p.score));
-  // Les villes passent avant les rues du même nom, puis les lieux les plus proches.
-  const rank = p => p.score + (p.type === "municipality" && p.score >= top - 0.06 ? 0.1 : 0) - hav(c, p) / 5000;
-  return list.sort((a, b) => rank(b) - rank(a)).slice(0, limit);
+  const c = me || map.getCenter(), enc = encodeURIComponent(q);
+  const ll = "&lat=" + c.lat.toFixed(4) + "&lon=" + c.lng.toFixed(4);
+  const pt = f => ({lat:f.geometry.coordinates[1], lng:f.geometry.coordinates[0]});
+  const [adr, poi, osm] = await Promise.all([
+    getFeatures(GEOCODE + "search?index=address&limit=10" + ll + "&q=" + enc, f => Object.assign(pt(f), {label:f.properties.label, ctx:f.properties.context || "",
+      type:f.properties.type, score:f.properties.score || 0})),
+    getFeatures(GEOCODE + "search?index=poi&limit=6" + ll + "&q=" + enc, f => { const p = f.properties, name = p.toponym || first(p.name);
+      if (!name || [].concat(p.category || []).some(k => norm(k) === norm(name))) return null; // noms vagues (« Équipement de transport »)
+      const city = first(p.city) || "", cat = first(p.category) || "";
+      return Object.assign(pt(f), {label:name + (city && !norm(name).includes(norm(city)) ? ", " + city : ""), ctx:[cat, [first(p.postcode), city].filter(Boolean).join(" ")].filter(Boolean).join(" · "),
+        type:"poi", score:p.score || 0}); }),
+    getFeatures(PHOTON + "?limit=8&lang=fr" + ll + "&q=" + enc, (f, i) => { const p = f.properties;
+      if (!p.name || (p.countrycode && p.countrycode !== "FR") || PHOTON_SKIP.test(p.osm_key || "")) return null;
+      return Object.assign(pt(f), {label:p.name + (p.city && p.city !== p.name ? ", " + p.city : ""),
+        ctx:[p.street ? (p.housenumber ? p.housenumber + " " : "") + p.street : "", [p.postcode, p.city].filter(Boolean).join(" ")].filter(Boolean).join(" · "),
+        type:"poi", score:0.62 - i * 0.02}); })
+  ]);
+  // Chaque mot tapé doit se retrouver dans le résultat : un lycée passe avant une rue qui porte seulement le même nom.
+  const qw = norm(q).split(" ").filter(w => w && !STOP.has(w));
+  const match = p => { if (!qw.length) return 1; const hw = norm(p.label + " " + p.ctx).split(" ");
+    return qw.filter(w => hw.some(h => h.startsWith(w))).length / qw.length; };
+  const top = Math.max(0, ...adr.map(p => p.score));
+  // Un numéro ou « rue, avenue… » : on cherche une adresse. Sinon, les lieux (lycée, mairie, magasin) passent devant.
+  const isAddr = /^\s*\d/.test(q) || /\b(rue|avenue|av|bd|boulevard|chemin|route|all[ée]e|impasse|place|quai|cours|lotissement)\b/i.test(q);
+  const kind = p => isAddr ? (p.type === "housenumber" ? 0.25 : p.type === "street" ? 0.1 : 0) : (p.type === "poi" ? 0.12 : 0);
+  const rank = p => match(p) * 1.2 + p.score * 0.5 + (p.type === "municipality" && p.score >= top - 0.06 ? 0.15 : 0) + kind(p) - hav(c, p) / 3000;
+  const out = [];
+  for (const p of [...adr, ...poi, ...osm].sort((a, b) => rank(b) - rank(a))){
+    // Même lieu trouvé par deux services : on ne le garde qu'une fois.
+    if (out.some(o => norm(o.label) === norm(p.label) || (o.type === "poi" && p.type === "poi" && hav(o, p) < 0.3))) continue;
+    out.push(p); if (out.length >= limit) break;
+  }
+  return out;
 }
 function setPlace(input, p){ input.value = p.label; input.dataset.lat = p.lat; input.dataset.lng = p.lng; }
 function suggest(input, ul, onPick){
@@ -580,7 +618,7 @@ function suggest(input, ul, onPick){
   });
   input.addEventListener("blur", () => setTimeout(() => ul.hidden = true, 150));
 }
-const goTo = p => { if (detail) closeDetail(); map.setView([p.lat, p.lng], p.type === "municipality" ? 13 : 15); };
+const goTo = p => { if (detail) closeDetail(); map.setView([p.lat, p.lng], p.type === "municipality" ? 13 : p.type === "poi" ? 16 : 15); };
 suggest($("q"), $("qSugg"), goTo);
 $("search").onsubmit = async e => { e.preventDefault(); const q = $("q").value.trim(); if (!q) return; $("q").blur();
   try { const [p] = await geocode(q, 1); if (p) goTo(p); else $("hSub").textContent = "Lieu introuvable."; } catch(err){ $("hSub").textContent = err.message; } };
