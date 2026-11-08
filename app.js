@@ -23,7 +23,7 @@ function hav(a, b){const R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dg=(b.lng-a.lng
 const fmtKm = d => d < 1 ? Math.round(d*1000) + " m" : d.toFixed(d < 10 ? 1 : 0).replace(".", ",") + " km";
 const fmtH = min => { min = Math.round(min); const h = Math.floor(min/60), m = min % 60; return h ? h + " h " + String(m).padStart(2,"0") : m + " min"; };
 const fmtClock = (t, ref) => { const d = new Date(t), days = Math.floor((new Date(t).setHours(0,0,0,0) - new Date(ref).setHours(0,0,0,0)) / 864e5);
-  return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0") + (days > 0 ? " (+" + days + " j)" : ""); };
+  return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0") + (days === 1 ? " demain" : days > 1 ? " (+" + days + " j)" : ""); };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const plural = (n, w) => n + " " + w + (n > 1 ? "s" : "");
 const dark = matchMedia("(prefers-color-scheme: dark)").matches;
@@ -553,7 +553,7 @@ $("loc").onclick = locateMe;
 /* Trois recherches en parallèle : adresses et lieux IGN, lieux OpenStreetMap (Photon : écoles, magasins, mairies…). */
 const PHOTON = "https://photon.komoot.io/api/";
 const STOP = new Set(["de","du","des","la","le","les","l","d","a","au","aux","sur","en","et","rue","avenue","av","bd","boulevard","place","chemin","route","allee","impasse"]);
-const norm = s => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const norm = s => String(s || "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const first = v => Array.isArray(v) ? v[0] : v;
 async function getFeatures(url, fn){
   try {
@@ -727,6 +727,17 @@ function renderRecents(){
 }
 renderRecents();
 function nowHHMM(){ const d = new Date(); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }
+/* Heure du trajet : « Maintenant » par défaut (toujours l'heure du moment), ou « Partir à » / « Arriver à ». */
+let when = "now";
+function setWhen(w){
+  if (w !== "now" && when === "now") $("dep").value = nowHHMM();
+  when = w;
+  document.querySelectorAll("[data-when]").forEach(b => b.setAttribute("aria-pressed", b.dataset.when === w));
+  $("timeField").hidden = w === "now";
+  $("depLbl").textContent = w === "arr" ? "Arrivée souhaitée à" : "Départ à";
+}
+document.querySelectorAll("[data-when]").forEach(b => b.onclick = () => setWhen(b.dataset.when));
+setWhen("now");
 
 /* ---------- Itinéraire ---------- */
 async function resolvePlace(input, useMe){
@@ -864,12 +875,16 @@ $("tripForm").onsubmit = async e => {
     const sp = sampleRoute(r.pts);
     tripLayer.clearLayers(); selLayer.clearLayers();
     const line = L.polyline(r.pts.map(p => [p.lat, p.lng]), {color:COL.route, weight:6, opacity:.85, interactive:false}).addTo(tripLayer);
-    const [hh, mm] = ($("dep").value || nowHHMM()).split(":").map(Number);
-    const dep = new Date(); dep.setHours(hh, mm, 0, 0);
+    // Heure : maintenant, partir à, ou arriver à (une heure déjà passée = demain).
+    const now = Date.now(), ref = now;
+    const atTime = () => { const [hh, mm] = ($("dep").value || nowHHMM()).split(":").map(Number); const d = new Date(); d.setHours(hh, mm, 0, 0);
+      if (d.getTime() < now - (when === "arr" ? 0 : 15 * 6e4)) d.setDate(d.getDate() + 1); return d; };
+    const goal = when === "arr" ? atTime() : null;
+    let dep = when === "dep" ? atTime() : new Date(now);
     rangeNow = cfg.range; let wxNote = "";
     if (cfg.wx){
       status("Météo du trajet…");
-      try { const mid = sp[Math.floor(sp.length / 2)], T = await tempAt(mid.lat, mid.lng, dep.getTime() + r.min * 3e4);
+      try { const mid = sp[Math.floor(sp.length / 2)], T = await tempAt(mid.lat, mid.lng, goal ? goal.getTime() - r.min * 9e4 : dep.getTime() + r.min * 3e4);
         rangeNow = Math.round(cfg.range * wxFactor(T));
         wxNote = `Météo prévue sur le trajet : ${Math.round(T)} °C → autonomie estimée ${rangeNow} km` + (rangeNow < cfg.range ? ` (au lieu de ${cfg.range} km)` : "") + "."; }
       catch(e){ wxNote = "Météo indisponible : autonomie réglée utilisée."; }
@@ -884,7 +899,11 @@ $("tripForm").onsubmit = async e => {
     const minPerKm = driveMin / Math.max(r.km, 0.1);
     let t = dep.getTime(), prevKm = 0, back = 0;
     res.stops.forEach(x => { x.arrT = t + ((x.s.km - prevKm) + back + x.s.detour) * minPerKm * 6e4; x.leaveT = x.arrT + x.minutes * 6e4; t = x.leaveT; prevKm = x.s.km; back = x.s.detour; });
-    const arrT = t + (r.km - prevKm + back) * minPerKm * 6e4;
+    let arrT = t + (r.km - prevKm + back) * minPerKm * 6e4, late = false;
+    // « Arriver à » : on recule tout le trajet pour finir pile à l'heure voulue.
+    if (goal){ const shift = goal.getTime() - arrT; dep = new Date(dep.getTime() + shift); arrT += shift;
+      res.stops.forEach(x => { x.arrT += shift; x.leaveT += shift; }); late = dep.getTime() < now - 2 * 6e4; }
+    const keyTime = goal ? "départ " + fmtClock(dep, ref) : "arrivée " + fmtClock(arrT, ref);
     const chargeMin = res.stops.reduce((s, x) => s + x.minutes, 0);
     res.stops.forEach(x => x.cost = costOf(x.s, x.chargeTo - x.arrive));
     const cost = {eur:res.stops.reduce((a, x) => a + x.cost.eur, 0), est:res.stops.some(x => x.cost.est)};
@@ -895,7 +914,7 @@ $("tripForm").onsubmit = async e => {
     L.marker([a.lat, a.lng], {icon:pinIcon("A", "end-icon"), interactive:false}).addTo(tripLayer);
     L.marker([b.lat, b.lng], {icon:pinIcon("B", "end-icon"), interactive:false}).addTo(tripLayer);
     const stopInfo = (x, i) => `<div class="stopinfo"><b>Arrêt ${i + 1}</b> · km ${Math.round(x.s.km)}<br>
-      Arrivée vers <b>${fmtClock(x.arrT, dep)}</b> avec ${Math.round(x.arrive)} % · recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}, ${fmtEur(x.cost)}) · départ vers ${fmtClock(x.leaveT, dep)}
+      Arrivée vers <b>${fmtClock(x.arrT, ref)}</b> avec ${Math.round(x.arrive)} % · recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}, ${fmtEur(x.cost)}) · départ vers ${fmtClock(x.leaveT, ref)}
       ${socBar(x.arrive, x.chargeTo)}</div>`;
     res.stops.forEach((x, i) => { L.marker([x.s.lat, x.s.lng], {icon:pinIcon(i + 1, "num-icon"), zIndexOffset:500})
       .on("click", () => { lastMarkerTap = Date.now(); showDetail(x.s, "trip", stopInfo(x, i)); }).addTo(tripLayer); });
@@ -904,28 +923,30 @@ $("tripForm").onsubmit = async e => {
       <div><b>${Math.round(r.km)}</b><span>km</span></div>
       <div><b>${fmtH(chargeMin)}</b><span>recharge</span></div>
       <div><b>${res.stops.length ? fmtEur(cost).replace("≈ ", "") : "0 €"}</b><span>${cost.est ? "coût estimé" : "coût"}</span></div>
-      <div><b>${fmtClock(arrT, dep)}</b><span>arrivée</span></div></div>
+      <div><b>${fmtClock(goal ? dep : arrT, ref)}</b><span>${goal ? "départ" : "arrivée"}</span></div></div>
       <div class="note" style="margin-top:0">${plural(res.stops.length, "arrêt")} · conduite ${fmtH(driveMin)} + recharge ${fmtH(chargeMin)} = ${fmtH((arrT - dep) / 6e4)} au total.</div>
-      ${wxNote ? `<div class="note wx">${esc(wxNote)}</div>` : ""}`;
+      ${wxNote ? `<div class="note wx">${esc(wxNote)}</div>` : ""}
+      ${goal && !late ? `<div class="note wx">Pour arriver à <b>${fmtClock(goal, ref)}</b>, partez à <b>${fmtClock(dep, ref)}</b>.</div>` : ""}`;
+    if (late) html += `<div class="alert">Trop tard pour arriver à ${fmtClock(goal, ref)} : il aurait fallu partir à ${fmtClock(dep, ref)}. En partant maintenant, arrivée vers ${fmtClock(now + (arrT - dep), ref)}.</div>`;
     if (!r.twizy) html += `<div class="alert">Calcul de secours : l'itinéraire peut emprunter une voie express interdite à la Twizy. Réessayez dans un moment.</div>`;
     if (bad) html += `<div class="alert">Une partie des bornes n'a pas pu être chargée : le plan peut en manquer.</div>`;
     if (!res.ok) html += `<div class="alert">Aucune borne compatible atteignable : la batterie atteint la réserve vers le km ${Math.max(0, Math.round(res.failAt))}${res.gapTo ? ` et la borne suivante est au km ${Math.round(res.gapTo)}` : ""}. Augmentez le détour maximum, baissez la réserve ou partez plus chargé.</div>`;
-    html += `<ol class="steps"><li><span class="pin">A</span><div><div class="t">${esc(a.label)}</div><div class="m"><span class="clock">${fmtClock(dep, dep)}</span> · départ avec ${cfg.soc} %</div></div></li>`;
+    html += `<ol class="steps"><li><span class="pin">A</span><div><div class="t">${esc(a.label)}</div><div class="m"><span class="clock">${fmtClock(dep, ref)}</span> · départ avec ${cfg.soc} %</div></div></li>`;
     res.stops.forEach((x, i) => {
       html += `<li data-i="${i}"><span class="pin stop">${i + 1}</span><div>
         <div class="t">${esc(x.s.name)}</div>
         <div class="m">Km ${Math.round(x.s.km)}${x.s.detour > 0.3 ? " · détour " + fmtKm(x.s.detour) : ""}${x.s.addr ? " · " + esc(x.s.addr) : ""}</div>
-        <div class="m"><span class="clock">${fmtClock(x.arrT, dep)}</span> arrivée avec ${Math.round(x.arrive)} % → recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}, ${fmtEur(x.cost)}) · repart <span class="clock">${fmtClock(x.leaveT, dep)}</span></div>
+        <div class="m"><span class="clock">${fmtClock(x.arrT, ref)}</span> arrivée avec ${Math.round(x.arrive)} % → recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)}, ${fmtEur(x.cost)}) · repart <span class="clock">${fmtClock(x.leaveT, ref)}</span></div>
         ${socBar(x.arrive, x.chargeTo)}<div class="tags">${tagsHTML(x.s)}</div>
         <a class="go" data-app="${navApp}" target="_blank" rel="noopener" href="${navURL(navApp, x.s.lat, x.s.lng)}">Y aller</a></div></li>`;
     });
-    if (res.ok) html += `<li><span class="pin">B</span><div><div class="t">${esc(b.label)}</div><div class="m"><span class="clock">${fmtClock(arrT, dep)}</span> · arrivée avec environ ${Math.round(res.arrival)} %</div>
+    if (res.ok) html += `<li><span class="pin">B</span><div><div class="t">${esc(b.label)}</div><div class="m"><span class="clock">${fmtClock(arrT, ref)}</span> · arrivée avec environ ${Math.round(res.arrival)} %</div>
       <a class="go" data-app="${navApp}" target="_blank" rel="noopener" href="${navURL(navApp, b.lat, b.lng)}">Y aller</a></div></li>`;
     html += `</ol><div class="note">Estimation avec ${rangeNow} km d'autonomie${cand.length ? " et " + plural(cand.length, "borne") + " compatible" + (cand.length > 1 ? "s" : "") + " trouvée" + (cand.length > 1 ? "s" : "") + " sur le trajet" : ""}. Touchez un arrêt pour voir la fiche de la borne.</div>
       <button type="button" class="ghost" id="edit">Modifier le trajet ou les réglages</button>`;
     out.innerHTML = html; out.hidden = false; $("tripForm").hidden = true;
     $("paneTrip").scrollTop = 0;
-    setTripHead("Vers " + b.label.split(/\s\d{5}\s?/)[0], res.ok ? (res.stops.length ? plural(res.stops.length, "recharge") + " prévue" + (res.stops.length > 1 ? "s" : "") + " · arrivée " + fmtClock(arrT, dep) : "Pas besoin de recharger · arrivée " + fmtClock(arrT, dep)) : "Trajet impossible avec ces réglages");
+    setTripHead("Vers " + b.label.split(/\s\d{5}\s?/)[0], res.ok ? (res.stops.length ? plural(res.stops.length, "recharge") + " prévue" + (res.stops.length > 1 ? "s" : "") + " · " + keyTime : "Pas besoin de recharger · " + keyTime) : "Trajet impossible avec ces réglages");
     out.querySelectorAll("li[data-i]").forEach(li => li.onclick = ev => { if (ev.target.closest("a")) return;
       const i = +li.dataset.i, x = res.stops[i]; showDetail(x.s, "trip", stopInfo(x, i)); });
     $("edit").onclick = () => { showForm(); setSnap("full"); };
@@ -947,7 +968,6 @@ function setMode(m){
   if (m === "map"){ tripLayer.remove(); nearLayer.addTo(map); showPane("map"); loadNear(); setSnap(snapName === "full" ? "half" : snapName); }
   else {
     nearLayer.remove(); tripLayer.addTo(map); showPane("trip");
-    if (!$("dep").value) $("dep").value = nowHHMM();
     if ($("tripResult").hidden){ showForm(); setSnap("full"); } else { restoreTripHead(); setSnap("half"); }
   }
 }
