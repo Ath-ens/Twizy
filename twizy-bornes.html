@@ -208,7 +208,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 .g-btn.stop{background:#e11d48;color:#fff}
 #gCard{display:flex;flex-direction:column;gap:6px}
 #gCard .m{font-size:14px;color:var(--muted)}
-.g-me{width:44px;height:44px;transition:transform .4s;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
+.g-me{width:44px;height:44px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
 .g-rec{position:fixed;right:16px;bottom:calc(env(safe-area-inset-bottom,0px) + 110px);z-index:1100;height:46px;padding:0 16px;border-radius:999px;background:var(--night);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 @media (prefers-reduced-motion:reduce){.sheet,.fab{transition:none}.spin{animation-duration:2s}}
 </style>
@@ -218,7 +218,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 16 · 8 nov. 22 h 15</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 17 · 8 nov. 22 h 30</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -388,7 +388,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 
 </body>
 </html>
