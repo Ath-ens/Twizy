@@ -965,12 +965,35 @@ $("tripForm").onsubmit = async e => {
 };
 
 /* ---------- Boussole du téléphone (la carte tourne quand on tourne le téléphone) ---------- */
-let compass = null, compassOn = false, headMode = false, cPending = false, cLast = null;
+let compass = null, compassOn = false, headMode = false;
+/* Rotation animée image par image : on fixe une cible, l'affichage la rejoint en douceur (pas de crans). */
+const ROT = {target:0, shown:null, headUp:true, raf:0, t:0};
+function rotTo(deg, headUp){
+  ROT.target = (deg + 360) % 360; ROT.headUp = headUp;
+  if (ROT.shown == null) ROT.shown = ROT.target;
+  if (!ROT.raf){ ROT.t = performance.now(); ROT.raf = requestAnimationFrame(rotStep); }
+}
+function rotStep(now){
+  const dt = Math.min(100, Math.max(0, now - ROT.t)); ROT.t = now;
+  const d = ((ROT.target - ROT.shown + 540) % 360) - 180, done = Math.abs(d) < 0.05;
+  ROT.shown = (ROT.shown + (done ? d : d * (1 - Math.exp(-dt / 160))) + 360) % 360;
+  applyRot();
+  ROT.raf = done ? 0 : requestAnimationFrame(rotStep);
+}
+function applyRot(){
+  const b = ROT.shown;
+  if (canRotate) map.setBearing(ROT.headUp ? 360 - b : 0);
+  const el = gMe && gMe.getElement && gMe.getElement();
+  if (el && el.firstChild){ el.firstChild.style.transition = "none"; el.firstChild.style.transform = "rotate(" + (ROT.headUp ? 0 : b) + "deg)"; }
+}
 function onOrient(e){
   let h = e.webkitCompassHeading != null ? e.webkitCompassHeading : (e.absolute && e.alpha != null ? 360 - e.alpha : null);
   if (h == null || isNaN(h)) return;
   const scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-  compass = (h + scr + 360) % 360; onCompass();
+  const c = (h + scr + 360) % 360;
+  // Petit lissage de la boussole pour effacer ses tremblements.
+  compass = compass == null ? c : (compass + (((c - compass + 540) % 360) - 180) * 0.35 + 360) % 360;
+  onCompass();
 }
 function enableCompass(){
   // Sur iPhone, l'autorisation doit être demandée pendant le toucher : cette fonction est appelée tout de suite au clic.
@@ -983,20 +1006,16 @@ function enableCompass(){
   return Promise.resolve(go());
 }
 function onCompass(){
-  if (cPending) return; cPending = true;
-  requestAnimationFrame(() => { cPending = false;
-    if (compass == null || (cLast != null && Math.abs(((compass - cLast + 540) % 360) - 180) < 2)) return;
-    cLast = compass;
-    if (G){ if (G.lastP && !G.moving) updateView(G.lastP, compass, true); }
-    else if (headMode && canRotate) map.setBearing(360 - compass);
-  });
+  if (compass == null) return;
+  if (G){ if (G.lastP && !G.moving) updateView(G.lastP, compass, true); }
+  else if (headMode && canRotate) rotTo(compass, true);
 }
 function paintLoc(){ $("loc").setAttribute("aria-pressed", headMode); $("loc").setAttribute("aria-label", headMode ? "Carte orientée comme le téléphone (toucher pour remettre le nord en haut)" : "Me localiser"); }
 // Bouton de position : 1er toucher = me localiser ; 2e toucher = la carte suit l'orientation du téléphone ; 3e = nord en haut.
 $("loc").onclick = () => {
-  if (headMode){ headMode = false; if (canRotate) map.setBearing(0); paintLoc(); return; }
+  if (headMode){ headMode = false; rotTo(0, true); paintLoc(); return; }
   if (me && canRotate && map.distance(map.getCenter(), [me.lat, me.lng]) < 60){
-    enableCompass().then(ok => { if (ok){ headMode = true; paintLoc(); if (compass != null){ cLast = null; onCompass(); } } else $("hSub").textContent = "Boussole non autorisée : réglages de Safari > Mouvement et orientation."; });
+    enableCompass().then(ok => { if (ok){ headMode = true; paintLoc(); onCompass(); } else $("hSub").textContent = "Boussole non autorisée : réglages de Safari > Mouvement et orientation."; });
     return;
   }
   locateMe();
@@ -1084,7 +1103,7 @@ function stopGuide(){
   try { G.wake && G.wake.release(); } catch(e) {}
   try { speechSynthesis.cancel(); } catch(e) {}
   G = null; gLayer.remove(); if (gMe){ gMe.remove(); gMe = null; }
-  if (canRotate) map.setBearing(0);
+  rotTo(0, true);
   document.body.classList.remove("guiding"); $("guide").hidden = true;
   tripLayer.addTo(map); setMode("trip");
 }
@@ -1162,15 +1181,16 @@ function destPoint(p, brg, km){ const R = 6371, r = Math.PI / 180, d = km / R, l
   const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(t));
   return {lat:la2 / r, lng:p.lng + Math.atan2(Math.sin(t) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2)) / r}; }
 function updateView(p, hd, quick){
-  if (hd != null){ if (G.bear == null) G.bear = hd; else { const d = ((hd - G.bear + 540) % 360) - 180; G.bear = (G.bear + d * 0.6 + 360) % 360; } }
+  if (hd != null) G.bear = hd;
   const b = G.bear || 0, headUp = canRotate && !gNorthUp;
-  if (gMe){ gMe.setLatLng([p.lat, p.lng]); const el = gMe.getElement && gMe.getElement(); if (el && el.firstChild) el.firstChild.style.transform = "rotate(" + (headUp ? 0 : b) + "deg)"; }
-  if (canRotate) map.setBearing(headUp ? 360 - b : 0);
-  if (G.follow){
-    // Position affichée un peu plus bas que le centre pour voir plus loin devant.
-    const z = map.getZoom(), ahead = innerHeight * 0.2 * 156543.03 * Math.cos(p.lat * Math.PI / 180) / Math.pow(2, z) / 1000;
-    const c = headUp ? destPoint(p, b, ahead) : p;
-    map.setView([c.lat, c.lng], z, {animate:!quick});
+  if (gMe) gMe.setLatLng([p.lat, p.lng]);
+  rotTo(b, headUp); // la rotation se fait en douceur, image par image
+  // La boussole (quick) ne fait que tourner la carte : pas de recentrage à chaque mouvement du téléphone.
+  if (G.follow && !quick){
+    // En roulant, position affichée plus bas que le centre pour voir loin devant ; à l'arrêt, au centre (la carte tourne autour de vous).
+    const z = map.getZoom(), ahead = G.moving ? innerHeight * 0.2 * 156543.03 * Math.cos(p.lat * Math.PI / 180) / Math.pow(2, z) / 1000 : 0;
+    const c = headUp && ahead ? destPoint(p, G.moving ? b : 0, ahead) : p;
+    map.setView([c.lat, c.lng], z, {animate:true});
   }
 }
 function paintNorth(){ $("gNorth").hidden = !canRotate; $("gNorth").textContent = gNorthUp ? "N↑" : "🧭"; $("gNorth").setAttribute("aria-label", gNorthUp ? "Carte nord en haut" : "Carte dans le sens de la route"); }
