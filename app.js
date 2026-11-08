@@ -1216,11 +1216,48 @@ function setMode(m){
 $("tabMap").onclick = () => mode !== "map" && setMode("map");
 $("tabTrip").onclick = () => mode !== "trip" && setMode("trip");
 
-/* ---------- Icône d'écran d'accueil ---------- */
-try { const c = document.createElement("canvas"); c.width = c.height = 180; const g = c.getContext("2d");
-  g.fillStyle = "#12305a"; g.fillRect(0, 0, 180, 180); g.fillStyle = "#f5b82e"; g.beginPath(); g.arc(90, 90, 60, 0, 7); g.fill();
-  g.fillStyle = "#12305a"; g.beginPath(); [[100,42],[62,100],[88,100],[78,140],[120,80],[94,80]].forEach(([x,y],i) => i ? g.lineTo(x,y) : g.moveTo(x,y)); g.fill();
-  $("touchIcon").href = c.toDataURL("image/png"); } catch(e) {}
+/* ---------- Logo de l'appli (dessiné ici : fond dégradé, épingle blanche, éclair jaune) ---------- */
+function drawLogo(px){
+  const c = document.createElement("canvas"); c.width = c.height = px; const g = c.getContext("2d"), s = px / 1080;
+  g.scale(s, s);
+  const bg = g.createLinearGradient(0, 0, 1080, 1080); bg.addColorStop(0, "#1f6aff"); bg.addColorStop(1, "#02c0a6");
+  g.fillStyle = bg; g.fillRect(0, 0, 1080, 1080);
+  g.fillStyle = "rgba(0,70,100,.35)"; g.beginPath(); g.ellipse(540, 880, 150, 28, 0, 0, 7); g.fill();
+  g.fillStyle = "#fff"; g.beginPath(); g.moveTo(540, 880); g.bezierCurveTo(420, 770, 260, 600, 260, 445);
+  g.arc(540, 445, 280, Math.PI, 0, false); g.bezierCurveTo(820, 600, 660, 770, 540, 880); g.fill();
+  g.beginPath(); [[585,255],[430,485],[522,485],[490,650],[655,410],[560,410]].forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
+  g.fillStyle = "#ffd21f"; g.fill(); g.lineJoin = "round"; g.lineWidth = 18; g.strokeStyle = "#2466ff"; g.stroke();
+  return c.toDataURL("image/png");
+}
+try { $("touchIcon").href = drawLogo(180); $("favIcon").href = drawLogo(64); } catch(e) {}
+
+/* ---------- Nouveautés : l'appli se souvient de la dernière version vue et montre ce qui a changé ---------- */
+const VERSION = 18;
+const CHANGELOG = [
+  [18, "8 nov.", ["Nouveau logo de l'appli", "Cet écran des nouveautés (touchez le numéro de version pour le revoir)"]],
+  [17, "8 nov.", ["Rotation de la carte beaucoup plus fluide"]],
+  [16, "8 nov.", ["La carte suit la boussole du téléphone : 2e toucher sur le bouton de position"]],
+  [15, "8 nov.", ["Guidage : carte orientée dans le sens de la route et flèche de position", "Bouton 🧭 pour revenir au nord en haut"]],
+  [14, "8 nov.", ["Guidage dans l'appli avec la voix, les arrêts recharge et le recalcul si vous vous trompez", "Secours : ouvrir le trajet dans Google Maps"]],
+  [13, "8 nov.", ["Heure du trajet : Maintenant, Partir à ou Arriver à"]],
+  [12, "8 nov.", ["La recherche trouve aussi les lieux : lycées, magasins, mairies…"]],
+  [11, "4 nov.", ["Appli réglée pour la Twizy 45 (45 km/h, petites routes)"]],
+  [10, "4 nov.", ["Autonomie selon la météo", "Suivi de recharge", "Mes notes sur les bornes", "Coût des recharges"]]
+];
+function showNews(since){
+  const list = CHANGELOG.filter(([v]) => v > since);
+  if (!list.length) return;
+  const box = document.createElement("div"); box.className = "news";
+  box.innerHTML = `<div class="news-card" role="dialog" aria-label="Nouveautés">
+    <div class="news-h">${since ? "Nouveautés depuis votre dernière visite" : "Historique des mises à jour"}</div>
+    <div class="news-list">${list.map(([v, d, items]) => `<div class="news-v"><b>Version ${v}</b> <span>${d}</span><ul>${items.map(t => `<li>${esc(t)}</li>`).join("")}</ul></div>`).join("")}</div>
+    <div class="note">Vos réglages, favoris, notes et trajets récents sont gardés d'une mise à jour à l'autre.</div>
+    <button type="button" class="primary">OK</button></div>`;
+  box.onclick = e => { if (e.target === box || e.target.closest("button")) box.remove(); };
+  document.body.appendChild(box);
+}
+(() => { const seen = +store.get("seenVersion") || 0; store.set("seenVersion", VERSION); if (seen && seen < VERSION) setTimeout(() => showNews(seen), 600); })();
+document.querySelector(".ver") && (document.querySelector(".ver").onclick = () => showNews(0));
 
 /* ---------- Démarrage ---------- */
 paintFilters();
