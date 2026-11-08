@@ -62,6 +62,7 @@ input[type=search],input[type=time],input[type=text]{width:100%;min-width:0;bord
 .fab{position:fixed;right:max(14px,env(safe-area-inset-right,0px));bottom:0;z-index:999;transform:translateY(calc(-1 * var(--vis) - 14px));transition:transform .28s cubic-bezier(.2,.8,.2,1),opacity .2s}
 .fab button{width:54px;height:54px;border-radius:50%;background:var(--card);color:var(--fg);box-shadow:0 4px 14px rgba(0,0,0,.25);display:grid;place-items:center}
 .fab button:active{transform:scale(.94)}
+.fab button[aria-pressed="true"]{background:#1a73e8;color:#fff}
 .fab.off{opacity:0;pointer-events:none}
 body.dragging .fab,body.dragging .sheet{transition:none}
 
@@ -217,7 +218,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 15 · 8 nov. 21 h 45</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 16 · 8 nov. 22 h 15</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -387,7 +388,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 
 </body>
 </html>
