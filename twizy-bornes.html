@@ -197,7 +197,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 12 · 8 nov. 12 h 45</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 13 · 8 nov. 13 h</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -251,8 +251,16 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
         </div>
       </div>
       <div class="quick" id="recents"></div>
-      <div class="field" style="max-width:180px">
-        <label for="dep">Départ à</label>
+      <div class="set">
+        <label>Heure</label><span></span>
+        <div class="seg">
+          <button type="button" data-when="now" aria-pressed="true">Maintenant</button>
+          <button type="button" data-when="dep" aria-pressed="false">Partir à</button>
+          <button type="button" data-when="arr" aria-pressed="false">Arriver à</button>
+        </div>
+      </div>
+      <div class="field" id="timeField" style="max-width:180px" hidden>
+        <label for="dep" id="depLbl">Départ à</label>
         <input id="dep" type="time">
       </div>
       <div class="set">
@@ -344,7 +352,7 @@ button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=12"></script>
+<script src="app.js?v=13"></script>
 
 </body>
 </html>
