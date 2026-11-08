@@ -549,7 +549,6 @@ async function locateMe(){
   catch(e){ $("hSub").textContent = e.message + ". Cherchez une ville à la place."; }
   finally { setLoading(busy()); }
 }
-$("loc").onclick = locateMe;
 
 /* ---------- Adresses avec suggestions ---------- */
 /* Trois recherches en parallèle : adresses et lieux IGN, lieux OpenStreetMap (Photon : écoles, magasins, mairies…). */
@@ -965,6 +964,44 @@ $("tripForm").onsubmit = async e => {
   } finally { btn.disabled = false; btn.textContent = "Calculer mon trajet"; tripBusy = false; setLoading(busy()); }
 };
 
+/* ---------- Boussole du téléphone (la carte tourne quand on tourne le téléphone) ---------- */
+let compass = null, compassOn = false, headMode = false, cPending = false, cLast = null;
+function onOrient(e){
+  let h = e.webkitCompassHeading != null ? e.webkitCompassHeading : (e.absolute && e.alpha != null ? 360 - e.alpha : null);
+  if (h == null || isNaN(h)) return;
+  const scr = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+  compass = (h + scr + 360) % 360; onCompass();
+}
+function enableCompass(){
+  // Sur iPhone, l'autorisation doit être demandée pendant le toucher : cette fonction est appelée tout de suite au clic.
+  if (compassOn) return Promise.resolve(true);
+  const go = () => { addEventListener("ondeviceorientationabsolute" in window ? "deviceorientationabsolute" : "deviceorientation", onOrient); compassOn = true; return true; };
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function")
+      return DeviceOrientationEvent.requestPermission().then(r => r === "granted" ? go() : false, () => false);
+  } catch(e){ return Promise.resolve(false); }
+  return Promise.resolve(go());
+}
+function onCompass(){
+  if (cPending) return; cPending = true;
+  requestAnimationFrame(() => { cPending = false;
+    if (compass == null || (cLast != null && Math.abs(((compass - cLast + 540) % 360) - 180) < 2)) return;
+    cLast = compass;
+    if (G){ if (G.lastP && !G.moving) updateView(G.lastP, compass, true); }
+    else if (headMode && canRotate) map.setBearing(360 - compass);
+  });
+}
+function paintLoc(){ $("loc").setAttribute("aria-pressed", headMode); $("loc").setAttribute("aria-label", headMode ? "Carte orientée comme le téléphone (toucher pour remettre le nord en haut)" : "Me localiser"); }
+// Bouton de position : 1er toucher = me localiser ; 2e toucher = la carte suit l'orientation du téléphone ; 3e = nord en haut.
+$("loc").onclick = () => {
+  if (headMode){ headMode = false; if (canRotate) map.setBearing(0); paintLoc(); return; }
+  if (me && canRotate && map.distance(map.getCenter(), [me.lat, me.lng]) < 60){
+    enableCompass().then(ok => { if (ok){ headMode = true; paintLoc(); if (compass != null){ cLast = null; onCompass(); } } else $("hSub").textContent = "Boussole non autorisée : réglages de Safari > Mouvement et orientation."; });
+    return;
+  }
+  locateMe();
+};
+
 /* ---------- Guidage dans l'appli : suit l'itinéraire Twizy 45, voix, arrêts recharge ---------- */
 let lastTrip = null, G = null;
 const ARW = {8:"↑",9:"↗",10:"→",11:"↘",12:"↷",13:"↶",14:"↙",15:"←",16:"↖",17:"↑",18:"↗",19:"↖",20:"↗",21:"↖",22:"↑",23:"↗",24:"↖",25:"↑",26:"⟳",27:"⟳",4:"⚑",5:"⚑",6:"⚑"};
@@ -1022,6 +1059,8 @@ function drawGuide(){
 async function startGuide(){
   if (!lastTrip) return;
   say("Guidage démarré."); // à faire pendant le toucher pour qu'iPhone autorise la voix
+  enableCompass(); // idem pour la boussole (iPhone demande l'autorisation une fois)
+  headMode = false; paintLoc();
   $("gGo").disabled = true; $("gGo").textContent = "Calcul du guidage…";
   try {
     const p = await getPos();
@@ -1078,8 +1117,11 @@ function onGuidePos(pos){
   const p = {lat:pos.coords.latitude, lng:pos.coords.longitude};
   const leg = G.legs[0], s = snap(leg, p, G.idx), total = leg.cum[leg.cum.length - 1];
   // Direction : celle de la route devant nous (stable), sinon celle donnée par le GPS quand on roule.
+  // À l'arrêt ou au pas, c'est la boussole du téléphone qui oriente la carte.
+  G.lastP = p; G.moving = (pos.coords.speed || 0) > 2;
   let hd = null;
-  if (!G.paused && s.d <= 0.05) hd = bearingDeg(pointAt(leg, s.along), pointAt(leg, Math.min(total, s.along + 0.04)));
+  if (!G.paused && s.d <= 0.05 && (G.moving || compass == null)) hd = bearingDeg(pointAt(leg, s.along), pointAt(leg, Math.min(total, s.along + 0.04)));
+  if (hd == null && !G.moving) hd = compass;
   if (hd == null && pos.coords.heading != null && !isNaN(pos.coords.heading) && (pos.coords.speed || 0) > 1.5) hd = pos.coords.heading;
   updateView(p, hd);
   if (G.paused) return;
@@ -1119,7 +1161,7 @@ function pointAt(leg, along){
 function destPoint(p, brg, km){ const R = 6371, r = Math.PI / 180, d = km / R, la = p.lat * r, t = brg * r;
   const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(t));
   return {lat:la2 / r, lng:p.lng + Math.atan2(Math.sin(t) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2)) / r}; }
-function updateView(p, hd){
+function updateView(p, hd, quick){
   if (hd != null){ if (G.bear == null) G.bear = hd; else { const d = ((hd - G.bear + 540) % 360) - 180; G.bear = (G.bear + d * 0.6 + 360) % 360; } }
   const b = G.bear || 0, headUp = canRotate && !gNorthUp;
   if (gMe){ gMe.setLatLng([p.lat, p.lng]); const el = gMe.getElement && gMe.getElement(); if (el && el.firstChild) el.firstChild.style.transform = "rotate(" + (headUp ? 0 : b) + "deg)"; }
@@ -1128,7 +1170,7 @@ function updateView(p, hd){
     // Position affichée un peu plus bas que le centre pour voir plus loin devant.
     const z = map.getZoom(), ahead = innerHeight * 0.2 * 156543.03 * Math.cos(p.lat * Math.PI / 180) / Math.pow(2, z) / 1000;
     const c = headUp ? destPoint(p, b, ahead) : p;
-    map.setView([c.lat, c.lng], z, {animate:true});
+    map.setView([c.lat, c.lng], z, {animate:!quick});
   }
 }
 function paintNorth(){ $("gNorth").hidden = !canRotate; $("gNorth").textContent = gNorthUp ? "N↑" : "🧭"; $("gNorth").setAttribute("aria-label", gNorthUp ? "Carte nord en haut" : "Carte dans le sens de la route"); }
