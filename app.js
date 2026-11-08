@@ -943,6 +943,8 @@ $("tripForm").onsubmit = async e => {
     if (res.ok) html += `<li><span class="pin">B</span><div><div class="t">${esc(b.label)}</div><div class="m"><span class="clock">${fmtClock(arrT, ref)}</span> · arrivée avec environ ${Math.round(res.arrival)} %</div>
       <a class="go" data-app="${navApp}" target="_blank" rel="noopener" href="${navURL(navApp, b.lat, b.lng)}">Y aller</a></div></li>`;
     html += `</ol><div class="note">Estimation avec ${rangeNow} km d'autonomie${cand.length ? " et " + plural(cand.length, "borne") + " compatible" + (cand.length > 1 ? "s" : "") + " trouvée" + (cand.length > 1 ? "s" : "") + " sur le trajet" : ""}. Touchez un arrêt pour voir la fiche de la borne.</div>
+      ${res.ok ? `<button type="button" class="primary" id="gGo" style="width:100%;margin-top:14px">▶ Démarrer le guidage</button>
+      <a class="ghost glink" target="_blank" rel="noopener" id="gGoogle">Ouvrir dans Google Maps (secours)</a>` : ""}
       <button type="button" class="ghost" id="edit">Modifier le trajet ou les réglages</button>`;
     out.innerHTML = html; out.hidden = false; $("tripForm").hidden = true;
     $("paneTrip").scrollTop = 0;
@@ -950,6 +952,8 @@ $("tripForm").onsubmit = async e => {
     out.querySelectorAll("li[data-i]").forEach(li => li.onclick = ev => { if (ev.target.closest("a")) return;
       const i = +li.dataset.i, x = res.stops[i]; showDetail(x.s, "trip", stopInfo(x, i)); });
     $("edit").onclick = () => { showForm(); setSnap("full"); };
+    lastTrip = {a, b, stops:res.stops, pts:sp};
+    if ($("gGo")){ $("gGo").onclick = startGuide; $("gGoogle").href = googleURL(lastTrip); }
     if (b.label !== "Ma position"){ recents = [{label:b.label, lat:b.lat, lng:b.lng}, ...recents.filter(p => p.label !== b.label)].slice(0, 5); jset("recents", recents); renderRecents(); }
     setSnap("half");
     map.fitBounds(line.getBounds(), {paddingTopLeft:[24, hdrH + 16], paddingBottomRight:[24, curVis + 16]});
@@ -958,6 +962,148 @@ $("tripForm").onsubmit = async e => {
     out.innerHTML = `<div class="alert">${esc(err.message)}</div>`; out.hidden = false;
   } finally { btn.disabled = false; btn.textContent = "Calculer mon trajet"; tripBusy = false; setLoading(busy()); }
 };
+
+/* ---------- Guidage dans l'appli : suit l'itinéraire Twizy 45, voix, arrêts recharge ---------- */
+let lastTrip = null, G = null;
+const ARW = {8:"↑",9:"↗",10:"→",11:"↘",12:"↷",13:"↶",14:"↙",15:"←",16:"↖",17:"↑",18:"↗",19:"↖",20:"↗",21:"↖",22:"↑",23:"↗",24:"↖",25:"↑",26:"⟳",27:"⟳",4:"⚑",5:"⚑",6:"⚑"};
+const fmtDist = km => km < 1 ? Math.max(10, Math.round(km * 100) * 10) + " m" : km.toFixed(1).replace(".", ",") + " km";
+let gMuted = store.get("gMuted") === "1";
+function say(t){
+  if (gMuted || !t || !("speechSynthesis" in window)) return;
+  try { const u = new SpeechSynthesisUtterance(t); u.lang = "fr-FR"; u.rate = 1.02;
+    const v = speechSynthesis.getVoices().find(v => /^fr/i.test(v.lang)); if (v) u.voice = v;
+    speechSynthesis.cancel(); speechSynthesis.speak(u); } catch(e) {}
+}
+function googleURL(t){
+  // Secours : Google Maps avec les bornes et quelques points de notre trajet pour le forcer à suivre les mêmes routes.
+  const via = t.stops.map(x => x.s.lat.toFixed(5) + "," + x.s.lng.toFixed(5));
+  const n = Math.max(0, 8 - via.length), pts = t.pts;
+  const extra = []; for (let i = 1; i <= n; i++){ const p = pts[Math.floor(i * pts.length / (n + 1))]; if (p) extra.push(p); }
+  const wp = [...via.map((v, i) => ({v, k:t.stops[i].s.km})), ...extra.map(p => ({v:p.lat.toFixed(5) + "," + p.lng.toFixed(5), k:p.km || 0}))];
+  return "https://www.google.com/maps/dir/?api=1&origin=" + t.a.lat.toFixed(5) + "," + t.a.lng.toFixed(5) + "&destination=" + t.b.lat.toFixed(5) + "," + t.b.lng.toFixed(5)
+    + (wp.length ? "&waypoints=" + encodeURIComponent(wp.sort((x, y) => x.k - y.k).map(x => x.v).join("|")) : "") + "&travelmode=driving";
+}
+async function guideRoute(from, targets){
+  const body = {locations:[{lat:from.lat, lon:from.lng}, ...targets.map(t => ({lat:t.lat, lon:t.lng}))], costing:"motor_scooter",
+    costing_options:{motor_scooter:{top_speed:45, use_highways:0, use_primary:0.2, use_hills:0.3}}, units:"kilometers", language:"fr-FR"};
+  for (const u of VALHALLA){
+    try {
+      const r = await fetch(u + "?json=" + encodeURIComponent(JSON.stringify(body))); if (!r.ok) continue;
+      const t = (await r.json()).trip; if (!t || !t.legs) continue;
+      return t.legs.map(l => { const pts = decode6(l.shape), cum = [0];
+        for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + hav(pts[i - 1], pts[i]));
+        return {pts, cum, man:l.maneuvers}; });
+    } catch(e) {}
+  }
+  throw new Error("Guidage impossible pour le moment (service d'itinéraire indisponible).");
+}
+function snap(leg, p, from){
+  // Point le plus proche sur le tracé, en cherchant autour de la dernière position connue.
+  const k = Math.cos(p.lat * Math.PI / 180) * 111.32, X = q => q.lng * k, Y = q => q.lat * 110.57;
+  let best = {d:Infinity, i:0, along:0};
+  const lo = Math.max(0, from - 10), hi = Math.min(leg.pts.length - 1, from + 150);
+  for (let i = lo; i < hi; i++){
+    const a = leg.pts[i], b = leg.pts[i + 1], dx = X(b) - X(a), dy = Y(b) - Y(a), L2 = dx * dx + dy * dy;
+    let t = L2 ? ((X(p) - X(a)) * dx + (Y(p) - Y(a)) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
+    const d = Math.hypot(X(a) + t * dx - X(p), Y(a) + t * dy - Y(p));
+    if (d < best.d) best = {d, i, along:leg.cum[i] + t * (leg.cum[i + 1] - leg.cum[i])};
+  }
+  return best;
+}
+const gLayer = L.layerGroup();
+let gMe = null;
+function drawGuide(){
+  gLayer.clearLayers();
+  G.legs.forEach(l => L.polyline(l.pts.map(p => [p.lat, p.lng]), {color:COL.route, weight:8, opacity:.85, interactive:false}).addTo(gLayer));
+  G.targets.forEach((t, i) => L.marker([t.lat, t.lng], {icon:pinIcon(t.stop ? "⚡" : "B", t.stop ? "num-icon" : "end-icon"), interactive:false}).addTo(gLayer));
+}
+async function startGuide(){
+  if (!lastTrip) return;
+  say("Guidage démarré."); // à faire pendant le toucher pour qu'iPhone autorise la voix
+  $("gGo").disabled = true; $("gGo").textContent = "Calcul du guidage…";
+  try {
+    const p = await getPos();
+    const targets = [...lastTrip.stops.map(x => ({lat:x.s.lat, lng:x.s.lng, label:x.s.name, stop:x})), {lat:lastTrip.b.lat, lng:lastTrip.b.lng, label:lastTrip.b.label}];
+    G = {targets, legs:await guideRoute(p, targets), idx:0, off:0, spoken:new Set(), busy:false, paused:false, follow:true};
+    document.body.classList.add("guiding"); $("guide").hidden = false; $("gCard").hidden = true;
+    tripLayer.remove(); nearLayer.remove(); gLayer.addTo(map); drawGuide();
+    if (gMe) gMe.remove();
+    gMe = L.circleMarker([p.lat, p.lng], {renderer, radius:10, color:"#fff", weight:4, fillColor:"#1a73e8", fillOpacity:1, interactive:false}).addTo(map);
+    map.setView([p.lat, p.lng], 17);
+    try { G.wake = await navigator.wakeLock.request("screen"); } catch(e) {}
+    G.watch = navigator.geolocation.watchPosition(onGuidePos, () => { $("gIns").textContent = "Position GPS perdue…"; }, {enableHighAccuracy:true, maximumAge:1000, timeout:15000});
+    onGuidePos({coords:{latitude:p.lat, longitude:p.lng}});
+  } catch(e){ $("hSub").textContent = e.message; $("gGoogle").insertAdjacentHTML("beforebegin", `<div class="alert">${esc(e.message)}</div>`); }
+  finally { if ($("gGo")){ $("gGo").disabled = false; $("gGo").textContent = "▶ Démarrer le guidage"; } }
+}
+function stopGuide(){
+  if (!G) return;
+  if (G.watch != null) navigator.geolocation.clearWatch(G.watch);
+  try { G.wake && G.wake.release(); } catch(e) {}
+  try { speechSynthesis.cancel(); } catch(e) {}
+  G = null; gLayer.remove(); if (gMe){ gMe.remove(); gMe = null; }
+  document.body.classList.remove("guiding"); $("guide").hidden = true;
+  tripLayer.addTo(map); setMode("trip");
+}
+document.addEventListener("visibilitychange", async () => { if (G && !document.hidden){ try { G.wake = await navigator.wakeLock.request("screen"); } catch(e) {} } });
+async function reroute(p){
+  if (G.busy) return; G.busy = true; $("gIns").textContent = "Nouveau calcul…"; say("Nouvel itinéraire.");
+  try { G.legs = await guideRoute(p, G.targets); G.idx = 0; G.off = 0; G.spoken = new Set(); drawGuide(); }
+  catch(e){ $("gIns").textContent = "Hors trajet, nouveau calcul impossible pour le moment."; }
+  finally { G.busy = false; }
+}
+function arrived(){
+  const t = G.targets[0];
+  G.paused = true; $("gCard").hidden = false;
+  if (t.stop){
+    const x = t.stop;
+    say("Vous êtes arrivé à la borne. Rechargez jusqu'à " + x.chargeTo + " pour cent, environ " + fmtH(x.minutes).replace(" h ", " heure ") + ".");
+    $("gCard").innerHTML = `<b>⚡ Arrêt recharge : ${esc(t.label)}</b><div class="m">Recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)})</div>
+      <div class="acts"><button type="button" class="act plug" id="gPlug">⚡ Suivre la recharge</button><button type="button" class="act" id="gNext">▶ Reprendre</button></div>`;
+    $("gPlug").onclick = () => { chargeTarget = x.s; $("cFrom").value = Math.max(0, Math.min(95, Math.round(x.arrive / 5) * 5)); $("cTo").value = x.chargeTo;
+      charge = {start:Date.now(), from:+$("cFrom").value, to:x.chargeTo, s:slim(x.s)}; jset("charge", charge); paintChargePill(); $("gPlug").textContent = "Suivi lancé ✓"; };
+    $("gNext").onclick = () => { G.targets.shift(); G.legs.shift(); G.idx = 0; G.off = 0; G.spoken = new Set(); G.paused = false; $("gCard").hidden = true; drawGuide(); say("C'est reparti."); };
+  } else {
+    say("Vous êtes arrivé à destination.");
+    $("gCard").innerHTML = `<b>⚑ Arrivé : ${esc(t.label)}</b><div class="acts"><button type="button" class="act wide" id="gEnd">Terminer</button></div>`;
+    $("gEnd").onclick = stopGuide;
+  }
+}
+function onGuidePos(pos){
+  if (!G || G.busy) return;
+  const p = {lat:pos.coords.latitude, lng:pos.coords.longitude};
+  if (gMe) gMe.setLatLng([p.lat, p.lng]);
+  if (G.follow) map.panTo([p.lat, p.lng], {animate:true});
+  if (G.paused) return;
+  const leg = G.legs[0], s = snap(leg, p, G.idx), total = leg.cum[leg.cum.length - 1];
+  if (s.d > 0.05){ if (++G.off >= 3) { reroute(p); return; } } else { G.off = 0; G.idx = s.i; }
+  if (hav(p, G.targets[0]) < 0.04 || total - s.along < 0.03){ arrived(); return; }
+  const m = leg.man.find(m => m.type > 3 && leg.cum[m.begin_shape_index] > s.along + 0.005) || leg.man[leg.man.length - 1];
+  const dNext = Math.max(0, leg.cum[m.begin_shape_index] - s.along), key = G.targets.length + ":" + m.begin_shape_index;
+  $("gArrow").textContent = ARW[m.type] || "↑";
+  $("gDist").textContent = fmtDist(dNext);
+  // À une borne, on parle de la borne et non de « destination » (l'annonce d'arrivée vient de arrived()).
+  const tgt = G.targets[0], end = m.type >= 4 && m.type <= 6, side = m.type === 5 ? "sur la droite" : m.type === 6 ? "sur la gauche" : "devant vous";
+  $("gIns").textContent = end && tgt.stop ? "Borne " + side + " : " + tgt.label : m.instruction;
+  if (end && tgt.stop){
+    if (dNext < 0.3 && dNext > 0.08 && !G.spoken.has(key + "f")){ G.spoken.add(key + "f"); say("Dans " + Math.round(dNext * 20) * 50 + " mètres, la borne de recharge est " + side + "."); }
+  }
+  // Voix : une annonce vers 250 m, puis juste avant la manœuvre (pas pour la sortie d'un rond-point déjà annoncée).
+  else if (m.type !== 27 && !(end && dNext < 0.06)){
+    if (dNext < 0.06 && !G.spoken.has(key + "n")){ G.spoken.add(key + "n"); G.spoken.add(key + "f"); say(m.verbal_pre_transition_instruction || m.instruction); }
+    else if (dNext < 0.3 && dNext > 0.12 && !G.spoken.has(key + "f")){ G.spoken.add(key + "f");
+      const t = m.verbal_transition_alert_instruction || m.instruction; say("Dans " + Math.round(dNext * 20) * 50 + " mètres, " + t.charAt(0).toLowerCase() + t.slice(1)); }
+  }
+  const rem = (total - s.along) + G.legs.slice(1).reduce((a, l) => a + l.cum[l.cum.length - 1], 0);
+  const chargeLeft = G.targets.filter(t => t.stop).reduce((a, t) => a + t.stop.minutes, 0);
+  $("gEta").textContent = fmtClock(Date.now() + (rem / 36 * 60 + chargeLeft) * 6e4, Date.now());
+  $("gRem").textContent = fmtDist(rem) + (G.targets[0].stop ? " · borne dans " + fmtDist(total - s.along) : "");
+}
+$("gStop").onclick = stopGuide;
+$("gMute").onclick = () => { gMuted = !gMuted; store.set("gMuted", gMuted ? "1" : "0"); $("gMute").textContent = gMuted ? "🔇" : "🔊"; if (gMuted) try { speechSynthesis.cancel(); } catch(e) {} };
+$("gMute").textContent = gMuted ? "🔇" : "🔊";
+map.on("dragstart", () => { if (G){ G.follow = false; $("gRecenter").hidden = false; } });
+$("gRecenter").onclick = () => { if (!G) return; G.follow = true; $("gRecenter").hidden = true; if (gMe) map.setView(gMe.getLatLng(), 17); };
 
 /* ---------- Onglets ---------- */
 function setMode(m){
