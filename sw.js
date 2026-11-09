@@ -12,7 +12,9 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const u = new URL(req.url);
-  if (u.hostname === "tile.openstreetmap.org" || (u.hostname === "data.geopf.fr" && u.pathname === "/wmts")) { e.respondWith(tile(req)); return; }
+  // Carte vectorielle : style et index toujours redemandés (copie gardée pour rouler sans réseau), morceaux, icônes et polices gardés.
+  if (u.hostname === "tiles.openfreemap.org" && (u.pathname.startsWith("/styles/") || u.pathname === "/planet")) { e.respondWith(styleFirst(req)); return; }
+  if (u.hostname === "tiles.openfreemap.org" || u.hostname === "tile.openstreetmap.org" || (u.hostname === "data.geopf.fr" && u.pathname === "/wmts")) { e.respondWith(tile(req)); return; }
   if (u.hostname === "cdnjs.cloudflare.com" || u.hostname === "cdn.jsdelivr.net" || u.hostname === "fonts.googleapis.com" || u.hostname === "fonts.gstatic.com") { e.respondWith(cacheFirst(req)); return; }
   if (u.origin === self.location.origin) { e.respondWith(networkFirst(req)); return; }
 });
@@ -48,6 +50,19 @@ async function tile(req) {
 async function trim(c) {
   const keys = await c.keys();
   if (keys.length > 3000) for (const k of keys.slice(0, keys.length - 2400)) await c.delete(k);
+}
+
+async function styleFirst(req) {
+  const c = await caches.open(V + "-lib");
+  try {
+    const res = await fetch(req.url, { mode: "cors", credentials: "omit", cache: "no-cache" });
+    if (res.ok) c.put(req.url, res.clone());
+    return res;
+  } catch (err) {
+    const hit = (await c.match(req.url)) || (await (await caches.open(V + "-off")).match(req.url));
+    if (hit) return hit;
+    throw err;
+  }
 }
 
 async function networkFirst(req) {
