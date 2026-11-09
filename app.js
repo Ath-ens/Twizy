@@ -1,6 +1,6 @@
 /* Sources comparées : base nationale IRVE (data.gouv.fr), OpenStreetMap (Overpass) et, avec une clé, Open Charge Map.
    Itinéraire : Valhalla, profil deux-roues motorisé limité à 45 km/h (Twizy 45, sans autoroutes ni voies express), secours OSRM.
-   Adresses : Géoplateforme IGN. Fond de carte : OpenStreetMap. */
+   Adresses : Géoplateforme IGN. Fond de carte : OpenFreeMap (vectoriel), secours Plan IGN. */
 const DATASET_API = "https://www.data.gouv.fr/api/1/datasets/5448d3e0c751df01f85d0572/";
 const TABULAR = id => "https://tabular-api.data.gouv.fr/api/resources/" + id + "/data/";
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
@@ -87,17 +87,48 @@ if (start.z < MIN_ZOOM) start.z = 12;
 const map = L.map("map", {zoomControl:false, attributionControl:false, preferCanvas:true, bounceAtZoomLimits:false,
   rotate:true, touchRotate:false, rotateControl:false, bearing:0}).setView([start.lat, start.lng], start.z);
 const canRotate = typeof map.setBearing === "function"; // extension leaflet-rotate chargée ?
-L.control.attribution({position:"topright", prefix:false}).addTo(map);
+const attrib = L.control.attribution({position:"topright", prefix:false}).addTo(map);
 /* Fond de carte : Plan IGN (carte officielle française). Si le serveur IGN ne répond plus, on repasse sur OpenStreetMap. */
 const IGN_TILES = "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
 const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const tileURL = (z, x, y) => IGN_TILES.replace("{z}", z).replace("{y}", y).replace("{x}", x);
 let tileErr = 0, tileOk = 0;
-const base = L.tileLayer(IGN_TILES, {maxZoom:19, keepBuffer:6, updateWhenZooming:false,
-  attribution:'© <a href="https://www.ign.fr/">IGN</a> · Plan IGN'}).addTo(map);
-base.on("tileload", () => tileOk++);
-base.on("tileerror", () => { if (++tileErr >= 12 && tileErr > tileOk && navigator.onLine !== false){ base.off("tileerror"); map.removeLayer(base);
-  L.tileLayer(OSM_TILES, {maxZoom:19, keepBuffer:6, updateWhenZooming:false, attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map); } });
+function rasterBase(){
+  const base = L.tileLayer(IGN_TILES, {maxZoom:19, keepBuffer:6, updateWhenZooming:false,
+    attribution:'© <a href="https://www.ign.fr/">IGN</a> · Plan IGN'}).addTo(map);
+  base.on("tileload", () => tileOk++);
+  base.on("tileerror", () => { if (++tileErr >= 12 && tileErr > tileOk && navigator.onLine !== false){ base.off("tileerror"); map.removeLayer(base);
+    L.tileLayer(OSM_TILES, {maxZoom:19, keepBuffer:6, updateWhenZooming:false, attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map); } });
+}
+/* Carte « pro » : carte vectorielle OpenFreeMap (MapLibre), nette à tous les zooms, dessinée sous la carte Leaflet
+   et synchronisée avec elle (position, zoom et rotation : les noms de rue restent à l'endroit quand la carte tourne).
+   Style « Liberty » le jour, « Fiord » la nuit et en mode sombre. Sans WebGL, ou si le serveur ne répond pas : Plan IGN. */
+const GL_STYLE = night => "https://tiles.openfreemap.org/styles/" + (night ? "fiord" : "liberty");
+const GL_TILEJSON = "https://tiles.openfreemap.org/planet";
+let gl = null, glDark = dark;
+const hasGL = (() => { try { const c = document.createElement("canvas");
+  return !!(window.maplibregl && (c.getContext("webgl2") || c.getContext("webgl"))); } catch(e){ return false; } })();
+function glSync(){ if (!gl) return; const c = map.getCenter();
+  gl.jumpTo({center:[c.lng, c.lat], zoom:map.getZoom() - 1, bearing:canRotate ? -map.getBearing() : 0}); }
+function dropGL(){ if (!gl) return; try { gl.remove(); } catch(e) {} const el = $("glmap"); if (el) el.remove(); gl = null; document.body.classList.remove("gl");
+  attrib.removeAttribution('© <a href="https://openfreemap.org">OpenFreeMap</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'); rasterBase(); }
+if (hasGL){
+  try {
+    const el = document.createElement("div"); el.id = "glmap"; document.body.insertBefore(el, $("map"));
+    gl = new maplibregl.Map({container:el, style:GL_STYLE(dark), interactive:false, attributionControl:false, fadeDuration:0,
+      center:[start.lng, start.lat], zoom:start.z - 1});
+    document.body.classList.add("gl");
+    attrib.addAttribution('© <a href="https://openfreemap.org">OpenFreeMap</a> · © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>');
+    map.on("move zoom rotate viewreset", glSync);
+    // Zoom animé de Leaflet (double toucher, boutons) : la carte vectorielle suit le même mouvement.
+    map.on("zoomanim", e => { if (gl) gl.easeTo({center:[e.center.lng, e.center.lat], zoom:e.zoom - 1, bearing:canRotate ? -map.getBearing() : 0, duration:250, easing:t => 1 - Math.pow(1 - t, 3)}); });
+    map.on("resize", () => { if (gl){ gl.resize(); glSync(); } });
+    let glOk = false; gl.once("load", () => { glOk = true; });
+    setTimeout(() => { if (!glOk && gl && navigator.onLine !== false) dropGL(); }, 12000);
+    glSync();
+  } catch(e){ if (gl) dropGL(); else { const el = $("glmap"); if (el) el.remove(); document.body.classList.remove("gl"); rasterBase(); } }
+} else rasterBase();
+function setMapDark(on){ if (!gl || glDark === on) return; glDark = on; try { gl.setStyle(GL_STYLE(on)); } catch(e) {} }
 const renderer = L.canvas({padding:0.4, tolerance:10});
 const nearLayer = L.layerGroup().addTo(map);
 const tripLayer = L.layerGroup();
@@ -1144,7 +1175,7 @@ async function startGuide(){
 function stopGuide(){
   if (!G) return;
   if (G.total > 0.3) addLog({type:"trip", km:Math.round(G.total * 10) / 10, from:lastTrip.a.label, to:lastTrip.b.label, guided:true});
-  document.body.classList.remove("night");
+  document.body.classList.remove("night"); setMapDark(dark);
   if (G.watch != null) navigator.geolocation.clearWatch(G.watch);
   try { G.wake && G.wake.release(); } catch(e) {}
   try { speechSynthesis.cancel(); } catch(e) {}
@@ -1297,6 +1328,7 @@ const routeCol = () => document.body.classList.contains("night") ? "#5aa2f0" : C
 function setNight(on){
   if (document.body.classList.contains("night") === on) return;
   document.body.classList.toggle("night", on);
+  setMapDark(on || dark);
   gLayer.eachLayer(l => l.setStyle && l.setStyle({color:routeCol()}));
 }
 
@@ -1358,12 +1390,26 @@ function renderLog(){
 const OFF_CACHE = "twizy-v1-off";
 function lonLatTile(p, z){ const n = 2 ** z, r = p.lat * Math.PI / 180;
   return [Math.floor((p.lng + 180) / 360 * n), Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n)]; }
-function tilesAlong(pts){
-  const want = new Set(), pads = {12:0, 13:1, 14:1, 15:1, 16:2, 17:1};
+function tilesAlong(pts, pads){
+  const want = new Set();
   for (const z in pads){ const pad = pads[z]; let last = "";
     for (const p of pts){ const [x, y] = lonLatTile(p, +z), k = x + "_" + y; if (k === last) continue; last = k;
       for (let i = -pad; i <= pad; i++) for (let j = -pad; j <= pad; j++) want.add(z + "/" + (x + i) + "/" + (y + j)); } }
   return [...want];
+}
+/* Adresses des morceaux de carte à garder : carte vectorielle (zooms 8 à 14, elle s'agrandit ensuite toute seule)
+   avec ses styles jour et nuit, ses icônes et ses polices ; ou bien Plan IGN si la carte vectorielle n'est pas utilisée. */
+async function offTileURLs(pts){
+  const fill = (tpl, k) => { const [z, x, y] = k.split("/"); return tpl.replace("{z}", z).replace("{x}", x).replace("{y}", y); };
+  if (!gl) return tilesAlong(pts, {12:0, 13:1, 14:1, 15:1, 16:2, 17:1}).map(k => fill(IGN_TILES, k));
+  const tpl = (await (await fetch(GL_TILEJSON)).json()).tiles[0], extra = [GL_TILEJSON];
+  for (const night of [false, true]){
+    const url = GL_STYLE(night), st = await (await fetch(url)).json(); extra.push(url);
+    if (st.sprite) for (const sfx of [".json", ".png", "@2x.json", "@2x.png"]) extra.push(st.sprite + sfx);
+    const fonts = new Set(); (st.layers || []).forEach(l => { const f = l.layout && l.layout["text-font"]; if (Array.isArray(f) && f.every(x => typeof x === "string")) fonts.add(f.join(",")); });
+    if (st.glyphs) fonts.forEach(f => ["0-255", "256-511", "8192-8447"].forEach(r => extra.push(st.glyphs.replace("{fontstack}", encodeURIComponent(f)).replace("{range}", r))));
+  }
+  return [...new Set(extra)].concat(tilesAlong(pts, {8:0, 10:0, 11:1, 12:1, 13:1, 14:1}).map(k => fill(tpl, k)));
 }
 async function saveOffline(btn){
   if (!lastTrip) return;
@@ -1374,8 +1420,8 @@ async function saveOffline(btn){
     t.legs = await guideRoute(t.a, t.stops.map(x => ({lat:x.s.lat, lng:x.s.lng})).concat([{lat:t.b.lat, lng:t.b.lng}]));
     let bad = 0;
     if ("caches" in window){
-      const list = tilesAlong(t.legs.flatMap(l => l.pts)), c = await caches.open(OFF_CACHE), queue = list.slice(); let done = 0;
-      const worker = async () => { while (queue.length){ const [z, x, y] = queue.shift().split("/"), u = tileURL(z, x, y);
+      const list = await offTileURLs(t.legs.flatMap(l => l.pts)), c = await caches.open(OFF_CACHE), queue = list.slice(); let done = 0;
+      const worker = async () => { while (queue.length){ const u = queue.shift();
         try { if (!(await c.match(u))){ const r = await fetch(u, {mode:"cors", credentials:"omit"}); if (r.ok) await c.put(u, r); else bad++; } } catch(e){ bad++; }
         if (++done % 10 === 0) label("Carte enregistrée… " + Math.round(done / list.length * 100) + " %"); } };
       await Promise.all(Array.from({length:6}, worker));
@@ -1468,8 +1514,9 @@ function drawLogo(px){
 try { $("touchIcon").href = drawLogo(180); $("favIcon").href = drawLogo(64); } catch(e) {}
 
 /* ---------- Nouveautés : l'appli se souvient de la dernière version vue et montre ce qui a changé ---------- */
-const VERSION = 19;
+const VERSION = 20;
 const CHANGELOG = [
+  [20, "9 nov.", ["Carte pro : carte vectorielle nette comme Plans ou Google, version sombre la nuit et en mode sombre"]],
   [19, "9 nov.", ["Nouvelle carte : Plan IGN, plus lisible", "Batterie en direct pendant le guidage, avec une borne proposée si elle devient juste",
     "Zone atteignable avec votre batterie (bouton ◎ sur la carte)", "Carnet de bord : km, recharges et € par mois (onglet Carnet)",
     "Les côtes du trajet comptent dans l'autonomie", "Alerte de fin de recharge dans le Calendrier",
