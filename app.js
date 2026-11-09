@@ -72,7 +72,7 @@ async function tempAt(lat, lng, when){
   return j.hourly.temperature_2m[best];
 }
 const wxFactor = T => Math.max(0.62, Math.min(1, 0.75 + 0.0125 * T));
-let rangeNow = 0;
+let rangeNow = 0, climbF = 1; // climbF : surconsommation due aux côtes du trajet
 
 /* ---------- État ---------- */
 const F = Object.assign({t2:false, free:false, h24:false, fav:false, conf:false}, jget("filters", {}));
@@ -88,8 +88,16 @@ const map = L.map("map", {zoomControl:false, attributionControl:false, preferCan
   rotate:true, touchRotate:false, rotateControl:false, bearing:0}).setView([start.lat, start.lng], start.z);
 const canRotate = typeof map.setBearing === "function"; // extension leaflet-rotate chargée ?
 L.control.attribution({position:"topright", prefix:false}).addTo(map);
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom:19, keepBuffer:6, updateWhenZooming:false,
-  attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map);
+/* Fond de carte : Plan IGN (carte officielle française). Si le serveur IGN ne répond plus, on repasse sur OpenStreetMap. */
+const IGN_TILES = "https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&FORMAT=image/png&TILEMATRIXSET=PM&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}";
+const OSM_TILES = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+const tileURL = (z, x, y) => IGN_TILES.replace("{z}", z).replace("{y}", y).replace("{x}", x);
+let tileErr = 0, tileOk = 0;
+const base = L.tileLayer(IGN_TILES, {maxZoom:19, keepBuffer:6, updateWhenZooming:false,
+  attribution:'© <a href="https://www.ign.fr/">IGN</a> · Plan IGN'}).addTo(map);
+base.on("tileload", () => tileOk++);
+base.on("tileerror", () => { if (++tileErr >= 12 && tileErr > tileOk && navigator.onLine !== false){ base.off("tileerror"); map.removeLayer(base);
+  L.tileLayer(OSM_TILES, {maxZoom:19, keepBuffer:6, updateWhenZooming:false, attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map); } });
 const renderer = L.canvas({padding:0.4, tolerance:10});
 const nearLayer = L.layerGroup().addTo(map);
 const tripLayer = L.layerGroup();
@@ -387,7 +395,7 @@ function renderList(msg){
   vis.forEach(s => s.d = hav(ref, s)); vis.sort((a, b) => a.d - b.d);
   const n = vis.length;
   $("hTitle").textContent = F.fav ? (n ? plural(n, "favori") : "Aucun favori") : map.getZoom() < MIN_ZOOM ? "Rapprochez la carte" : (n ? n + (n > 1 ? " bornes compatibles" : " borne compatible") : (pending ? "Recherche des bornes…" : "Aucune borne compatible ici"));
-  $("hSub").textContent = msg || (failed && !n ? "Données indisponibles (" + (lastErr || "réseau") + "). Bougez la carte pour réessayer."
+  $("hSub").textContent = (zoneOn && zoneMsg) || msg || (failed && !n ? "Données indisponibles (" + (lastErr || "réseau") + "). Bougez la carte pour réessayer."
     : (me ? "Triées par distance de vous" : "Triées par distance du centre de la carte") + (sourcesLabel() ? " · " + sourcesLabel() : "") + (osmPending ? " · recherche d'autres bornes…" : ""));
   const frag = document.createDocumentFragment();
   if (!n && !pending){ const li = document.createElement("li"); li.className = "empty";
@@ -450,7 +458,7 @@ addEventListener("resize", () => { setSnap(snapName); map.invalidateSize(); });
 
 function showPane(name){
   pane = name;
-  $("paneMap").hidden = name !== "map"; $("paneTrip").hidden = name !== "trip"; $("paneDetail").hidden = name !== "detail"; $("paneCharge").hidden = name !== "charge";
+  $("paneMap").hidden = name !== "map"; $("paneTrip").hidden = name !== "trip"; $("paneDetail").hidden = name !== "detail"; $("paneCharge").hidden = name !== "charge"; $("paneLog").hidden = name !== "log";
   $("back").hidden = name !== "detail" && name !== "charge";
   if (name === "detail") $("paneDetail").scrollTop = 0;
 }
@@ -528,6 +536,8 @@ function closeDetail(){
   const from = detail.from; detail = null; selLayer.clearLayers();
   if (from === "map" && mode === "map"){ showPane("map"); renderList(); }
   else if (mode === "trip"){ showPane("trip"); restoreTripHead(); }
+  else if (mode === "log"){ showPane("log"); renderLog(); }
+  else { showPane("map"); renderList(); }
 }
 $("back").onclick = () => pane === "charge" ? closeCharge() : closeDetail();
 
@@ -675,6 +685,7 @@ function paintChargePill(){
   const st = chargeState(charge);
   pill.hidden = false;
   pill.textContent = st.done ? "⚡ Chargée à " + charge.to + " % ✓" : "⚡ " + Math.floor(st.pct) + " % · fin " + fmtClock(st.end, Date.now());
+  if (st.done && !charge.logged){ logCharge(charge, charge.to); charge.logged = true; jset("charge", charge); }
   if (pane === "charge") paintCharge();
 }
 function paintCharge(){
@@ -687,10 +698,11 @@ function paintCharge(){
       <div class="m">${st.done ? "Recharge terminée ✓" : "Fin prévue à <b>" + fmtClock(st.end, Date.now()) + "</b>, dans " + fmtH(left)}</div>
       <div class="m">Branchée à ${charge.from} % à ${fmtClock(charge.start, charge.start)} · objectif ${charge.to} %${charge.s ? " · " + fmtEur(costOf(charge.s, charge.to - charge.from)) : ""}</div>`;
     $("cSetup").hidden = true; $("cGo").hidden = true; $("cStop").hidden = false;
+    $("cCal").hidden = st.done; if (!st.done) $("cCal").href = icsURL(charge);
   } else {
     const min = Math.max(0, to - from) / 100 * cfg.full;
     $("cInfo").innerHTML = `<div class="m">Durée estimée : <b>${fmtH(min)}</b> · fin vers <b>${fmtClock(Date.now() + min * 6e4, Date.now())}</b>${c ? " · " + fmtEur(c) : ""}</div>`;
-    $("cSetup").hidden = false; $("cGo").hidden = false; $("cStop").hidden = true;
+    $("cSetup").hidden = false; $("cGo").hidden = false; $("cStop").hidden = true; $("cCal").hidden = true;
   }
 }
 let chargeTarget = null;
@@ -702,7 +714,7 @@ function openCharge(s){
   $("hSub").textContent = charge ? "Suivi en cours · gardé même si vous fermez l'appli" : "Indiquez la batterie actuelle puis démarrez";
   showPane("charge"); if (snapName === "peek") setSnap("half"); paintCharge();
 }
-function closeCharge(){ if (mode === "map"){ showPane("map"); renderList(); } else { showPane("trip"); restoreTripHead(); } }
+function closeCharge(){ if (mode === "map"){ showPane("map"); renderList(); } else if (mode === "log"){ showPane("log"); renderLog(); } else { showPane("trip"); restoreTripHead(); } }
 $("cFrom").oninput = paintCharge; $("cTo").oninput = paintCharge;
 document.querySelectorAll("[data-cfrom]").forEach(b => b.onclick = () => { $("cFrom").value = b.dataset.cfrom; paintCharge(); });
 $("cGo").onclick = () => {
@@ -711,7 +723,7 @@ $("cGo").onclick = () => {
   charge = {start:Date.now(), from, to, s: chargeTarget ? slim(chargeTarget) : null};
   jset("charge", charge); paintChargePill(); openCharge();
 };
-$("cStop").onclick = () => { charge = null; store.set("charge", ""); paintChargePill(); openCharge(); };
+$("cStop").onclick = () => { if (charge && !charge.logged) logCharge(charge, chargeState(charge).pct); charge = null; store.set("charge", ""); paintChargePill(); openCharge(); };
 $("cpill").onclick = () => openCharge();
 setInterval(paintChargePill, 20000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) paintChargePill(); });
@@ -761,13 +773,14 @@ function decode6(str){
 async function route(a, b){
   const body = {locations:[{lat:a.lat, lon:a.lng}, {lat:b.lat, lon:b.lng}], costing:"motor_scooter",
     costing_options:{motor_scooter:{top_speed:45, use_highways:0, use_primary:0.2, use_hills:0.3}},
-    units:"kilometers", directions_type:"none"};
+    units:"kilometers", directions_type:"none", elevation_interval:30};
   for (const u of VALHALLA){
     try {
       const r = await fetch(u + "?json=" + encodeURIComponent(JSON.stringify(body)));
       if (!r.ok) continue;
       const t = (await r.json()).trip; if (!t || !t.legs || !t.legs.length) continue;
-      return {pts:t.legs.flatMap(l => decode6(l.shape)), km:t.summary.length, min:t.summary.time / 60, twizy:true};
+      return Object.assign({pts:t.legs.flatMap(l => decode6(l.shape)), km:t.summary.length, min:t.summary.time / 60, twizy:true},
+        climb(t.legs.flatMap(l => l.elevation || [])));
     } catch(e) {}
   }
   const coords = a.lng + "," + a.lat + ";" + b.lng + "," + b.lat;
@@ -781,6 +794,21 @@ async function route(a, b){
     } catch(e) {}
   }
   throw new Error("Itinéraire impossible à calculer pour le moment.");
+}
+/* Côtes : montée et descente cumulées (altitudes tous les 30 m, lissées pour effacer le bruit). */
+function climb(el){
+  el = el.filter(v => v != null && !isNaN(v)); let up = 0, down = 0;
+  if (el.length < 2) return {};
+  const sm = el.map((_, i) => { const w = el.slice(Math.max(0, i - 2), i + 3); return w.reduce((a, b) => a + b, 0) / w.length; });
+  for (let i = 1; i < sm.length; i++){ const d = sm[i] - sm[i - 1]; if (d > 0) up += d; else down -= d; }
+  return {up:Math.round(up), down:Math.round(down)};
+}
+/* Énergie : Twizy + conducteur ≈ 560 kg. Monter coûte de la batterie, descendre en rend un peu (≈ 30 %).
+   Les petites ondulations (≈ 4 m par km) sont déjà dans l'autonomie réglée : on ne compte que ce qui dépasse. */
+function climbKm(up, down, range, km){
+  const kwhPerM = 560 * 9.81 / 3.6e6, base = 4 * (km || 0);
+  const extra = Math.max(0, up - base) * kwhPerM / 0.85 - Math.max(0, down - base) * kwhPerM * 0.3;
+  return Math.max(0, extra / (BATT / range));
 }
 function sampleRoute(pts){
   const out = [{lat:pts[0].lat, lng:pts[0].lng, km:0}]; let km = 0, acc = 0;
@@ -828,7 +856,7 @@ async function stationsAlong(sp, padKm, onProgress){
   return {list:res.sort((a, b) => a.km - b.km), bad};
 }
 function plan(totalKm, cand){
-  const pctPerKm = 100 / (rangeNow || cfg.range), reserve = cfg.reserve, target = cfg.target;
+  const pctPerKm = 100 / (rangeNow || cfg.range) * climbF, reserve = cfg.reserve, target = cfg.target;
   let pos = 0, soc = cfg.soc, back = 0; const stops = [];
   for (let guard = 0; guard < 40; guard++){
     const usable = (soc - reserve) / pctPerKm;
@@ -890,7 +918,12 @@ $("tripForm").onsubmit = async e => {
         wxNote = `Météo prévue sur le trajet : ${Math.round(T)} °C → autonomie estimée ${rangeNow} km` + (rangeNow < cfg.range ? ` (au lieu de ${cfg.range} km)` : "") + "."; }
       catch(e){ wxNote = "Météo indisponible : autonomie réglée utilisée."; }
     }
-    const directOk = r.km <= ((cfg.soc - cfg.reserve) / 100) * rangeNow;
+    // Côtes : kilomètres d'autonomie en plus consommés par les montées.
+    const hillKm = climbKm(r.up || 0, r.down || 0, rangeNow, r.km);
+    climbF = (r.km + hillKm) / Math.max(r.km, 0.1);
+    const hillNote = r.up == null ? "" : r.up < 15 ? "Trajet plat : les côtes ne changent rien." :
+      `Dénivelé : +${r.up} m / −${r.down} m → ${hillKm < 0.5 ? "effet négligeable" : "environ " + Math.round(hillKm) + " km d'autonomie en plus consommés"}.`;
+    const directOk = r.km * climbF <= ((cfg.soc - cfg.reserve) / 100) * rangeNow;
     let cand = [], bad = 0;
     if (!directOk){ status("Recherche des bornes sur le trajet…");
       ({list:cand, bad} = await stationsAlong(sp, cfg.detour, (d, n) => status(d < 0 ? "Comparaison avec les autres sources…" : "Bornes sur le trajet… " + Math.round(d / n * 100) + " %"))); }
@@ -927,6 +960,7 @@ $("tripForm").onsubmit = async e => {
       <div><b>${fmtClock(goal ? dep : arrT, ref)}</b><span>${goal ? "départ" : "arrivée"}</span></div></div>
       <div class="note" style="margin-top:0">${plural(res.stops.length, "arrêt")} · conduite ${fmtH(driveMin)} + recharge ${fmtH(chargeMin)} = ${fmtH((arrT - dep) / 6e4)} au total.</div>
       ${wxNote ? `<div class="note wx">${esc(wxNote)}</div>` : ""}
+      ${hillNote ? `<div class="note wx">${esc(hillNote)}</div>` : ""}
       ${goal && !late ? `<div class="note wx">Pour arriver à <b>${fmtClock(goal, ref)}</b>, partez à <b>${fmtClock(dep, ref)}</b>.</div>` : ""}`;
     if (late) html += `<div class="alert">Trop tard pour arriver à ${fmtClock(goal, ref)} : il aurait fallu partir à ${fmtClock(dep, ref)}. En partant maintenant, arrivée vers ${fmtClock(now + (arrT - dep), ref)}.</div>`;
     if (!r.twizy) html += `<div class="alert">Calcul de secours : l'itinéraire peut emprunter une voie express interdite à la Twizy. Réessayez dans un moment.</div>`;
@@ -945,6 +979,8 @@ $("tripForm").onsubmit = async e => {
       <a class="go" data-app="${navApp}" target="_blank" rel="noopener" href="${navURL(navApp, b.lat, b.lng)}">Y aller</a></div></li>`;
     html += `</ol><div class="note">Estimation avec ${rangeNow} km d'autonomie${cand.length ? " et " + plural(cand.length, "borne") + " compatible" + (cand.length > 1 ? "s" : "") + " trouvée" + (cand.length > 1 ? "s" : "") + " sur le trajet" : ""}. Touchez un arrêt pour voir la fiche de la borne.</div>
       ${res.ok ? `<button type="button" class="primary" id="gGo" style="width:100%;margin-top:14px">▶ Démarrer le guidage</button>
+      <div class="acts"><button type="button" class="act" id="tShare">💬 Envoyer mon heure</button><button type="button" class="act" id="tDone">✓ J'ai fait ce trajet</button></div>
+      <button type="button" class="ghost" id="tOff">📥 Enregistrer pour rouler sans réseau</button>
       <a class="ghost glink" target="_blank" rel="noopener" id="gGoogle">Ouvrir dans Google Maps (secours)</a>` : ""}
       <button type="button" class="ghost" id="edit">Modifier le trajet ou les réglages</button>`;
     out.innerHTML = html; out.hidden = false; $("tripForm").hidden = true;
@@ -953,8 +989,11 @@ $("tripForm").onsubmit = async e => {
     out.querySelectorAll("li[data-i]").forEach(li => li.onclick = ev => { if (ev.target.closest("a")) return;
       const i = +li.dataset.i, x = res.stops[i]; showDetail(x.s, "trip", stopInfo(x, i)); });
     $("edit").onclick = () => { showForm(); setSnap("full"); };
-    lastTrip = {a, b, stops:res.stops, pts:sp};
-    if ($("gGo")){ $("gGo").onclick = startGuide; $("gGoogle").href = googleURL(lastTrip); }
+    lastTrip = {a, b, stops:res.stops, pts:sp, range:rangeNow, climbF, km:r.km, arrT, legs:null};
+    if ($("gGo")){ $("gGo").onclick = startGuide; $("gGoogle").href = googleURL(lastTrip);
+      $("tShare").onclick = () => shareETA(arrT, b.label);
+      $("tDone").onclick = () => { addLog({type:"trip", km:Math.round(r.km * 10) / 10, from:a.label, to:b.label}); $("tDone").textContent = "Ajouté au carnet ✓"; $("tDone").disabled = true; };
+      $("tOff").onclick = () => saveOffline($("tOff")); }
     if (b.label !== "Ma position"){ recents = [{label:b.label, lat:b.lat, lng:b.lng}, ...recents.filter(p => p.label !== b.label)].slice(0, 5); jset("recents", recents); renderRecents(); }
     setSnap("half");
     map.fitBounds(line.getBounds(), {paddingTopLeft:[24, hdrH + 16], paddingBottomRight:[24, curVis + 16]});
@@ -1055,11 +1094,11 @@ async function guideRoute(from, targets){
   }
   throw new Error("Guidage impossible pour le moment (service d'itinéraire indisponible).");
 }
-function snap(leg, p, from){
+function snap(leg, p, from, full){
   // Point le plus proche sur le tracé, en cherchant autour de la dernière position connue.
   const k = Math.cos(p.lat * Math.PI / 180) * 111.32, X = q => q.lng * k, Y = q => q.lat * 110.57;
   let best = {d:Infinity, i:0, along:0};
-  const lo = Math.max(0, from - 10), hi = Math.min(leg.pts.length - 1, from + 150);
+  const lo = full ? 0 : Math.max(0, from - 10), hi = full ? leg.pts.length - 1 : Math.min(leg.pts.length - 1, from + 150);
   for (let i = lo; i < hi; i++){
     const a = leg.pts[i], b = leg.pts[i + 1], dx = X(b) - X(a), dy = Y(b) - Y(a), L2 = dx * dx + dy * dy;
     let t = L2 ? ((X(p) - X(a)) * dx + (Y(p) - Y(a)) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
@@ -1072,7 +1111,7 @@ const gLayer = L.layerGroup();
 let gMe = null;
 function drawGuide(){
   gLayer.clearLayers();
-  G.legs.forEach(l => L.polyline(l.pts.map(p => [p.lat, p.lng]), {color:COL.route, weight:8, opacity:.85, interactive:false}).addTo(gLayer));
+  G.legs.forEach(l => L.polyline(l.pts.map(p => [p.lat, p.lng]), {color:routeCol(), weight:8, opacity:.85, interactive:false}).addTo(gLayer));
   G.targets.forEach((t, i) => L.marker([t.lat, t.lng], {icon:pinIcon(t.stop ? "⚡" : "B", t.stop ? "num-icon" : "end-icon"), interactive:false}).addTo(gLayer));
 }
 async function startGuide(){
@@ -1080,11 +1119,16 @@ async function startGuide(){
   say("Guidage démarré."); // à faire pendant le toucher pour qu'iPhone autorise la voix
   enableCompass(); // idem pour la boussole (iPhone demande l'autorisation une fois)
   headMode = false; paintLoc();
-  $("gGo").disabled = true; $("gGo").textContent = "Calcul du guidage…";
+  const btn = $("gGo"); if (btn){ btn.disabled = true; btn.textContent = "Calcul du guidage…"; }
   try {
     const p = await getPos();
     const targets = [...lastTrip.stops.map(x => ({lat:x.s.lat, lng:x.s.lng, label:x.s.name, stop:x})), {lat:lastTrip.b.lat, lng:lastTrip.b.lng, label:lastTrip.b.label}];
-    G = {targets, legs:await guideRoute(p, targets), idx:0, off:0, spoken:new Set(), busy:false, paused:false, follow:true};
+    let legs, offline = false;
+    try { legs = await guideRoute(p, targets); }
+    catch(e){ if (!lastTrip.legs) throw e; legs = lastTrip.legs.map(l => Object.assign({}, l)); offline = true; } // sans réseau : trajet enregistré
+    G = {targets, legs, idx:0, off:0, spoken:new Set(), busy:false, paused:false, follow:true, offline,
+      socBase:cfg.soc, driven:0, total:0, pctKm:100 / (lastTrip.range || cfg.range) * (lastTrip.climbF || 1), lowWarned:false, prev:null};
+    if (offline) G.idx = snap(legs[0], p, 0, true).i;
     document.body.classList.add("guiding"); $("guide").hidden = false; $("gCard").hidden = true;
     tripLayer.remove(); nearLayer.remove(); gLayer.addTo(map); drawGuide();
     if (gMe) gMe.remove();
@@ -1094,11 +1138,13 @@ async function startGuide(){
     try { G.wake = await navigator.wakeLock.request("screen"); } catch(e) {}
     G.watch = navigator.geolocation.watchPosition(onGuidePos, () => { $("gIns").textContent = "Position GPS perdue…"; }, {enableHighAccuracy:true, maximumAge:1000, timeout:15000});
     onGuidePos({coords:{latitude:p.lat, longitude:p.lng}});
-  } catch(e){ $("hSub").textContent = e.message; $("gGoogle").insertAdjacentHTML("beforebegin", `<div class="alert">${esc(e.message)}</div>`); }
+  } catch(e){ $("hSub").textContent = e.message; const at = $("gGoogle") || $("offBox"); if (at) at.insertAdjacentHTML("beforebegin", `<div class="alert">${esc(e.message)}</div>`); }
   finally { if ($("gGo")){ $("gGo").disabled = false; $("gGo").textContent = "▶ Démarrer le guidage"; } }
 }
 function stopGuide(){
   if (!G) return;
+  if (G.total > 0.3) addLog({type:"trip", km:Math.round(G.total * 10) / 10, from:lastTrip.a.label, to:lastTrip.b.label, guided:true});
+  document.body.classList.remove("night");
   if (G.watch != null) navigator.geolocation.clearWatch(G.watch);
   try { G.wake && G.wake.release(); } catch(e) {}
   try { speechSynthesis.cancel(); } catch(e) {}
@@ -1108,10 +1154,10 @@ function stopGuide(){
   tripLayer.addTo(map); setMode("trip");
 }
 document.addEventListener("visibilitychange", async () => { if (G && !document.hidden){ try { G.wake = await navigator.wakeLock.request("screen"); } catch(e) {} } });
-async function reroute(p){
-  if (G.busy) return; G.busy = true; $("gIns").textContent = "Nouveau calcul…"; say("Nouvel itinéraire.");
-  try { G.legs = await guideRoute(p, G.targets); G.idx = 0; G.off = 0; G.spoken = new Set(); drawGuide(); }
-  catch(e){ $("gIns").textContent = "Hors trajet, nouveau calcul impossible pour le moment."; }
+async function reroute(p, force){
+  if (G.busy || (!force && Date.now() - (G.failT || 0) < 30000)) return; G.busy = true; $("gIns").textContent = "Nouveau calcul…";
+  try { G.legs = await guideRoute(p, G.targets); G.idx = 0; G.off = 0; G.spoken = new Set(); G.offline = false; drawGuide(); say(force ? "Itinéraire vers la borne." : "Nouvel itinéraire."); return true; }
+  catch(e){ G.failT = Date.now(); G.off = 0; $("gIns").textContent = "Hors trajet, nouveau calcul impossible sans réseau. Revenez sur le tracé bleu."; return false; }
   finally { G.busy = false; }
 }
 function arrived(){
@@ -1123,8 +1169,10 @@ function arrived(){
     $("gCard").innerHTML = `<b>⚡ Arrêt recharge : ${esc(t.label)}</b><div class="m">Recharger jusqu'à <b>${x.chargeTo} %</b> (${fmtH(x.minutes)})</div>
       <div class="acts"><button type="button" class="act plug" id="gPlug">⚡ Suivre la recharge</button><button type="button" class="act" id="gNext">▶ Reprendre</button></div>`;
     $("gPlug").onclick = () => { chargeTarget = x.s; $("cFrom").value = Math.max(0, Math.min(95, Math.round(x.arrive / 5) * 5)); $("cTo").value = x.chargeTo;
-      charge = {start:Date.now(), from:+$("cFrom").value, to:x.chargeTo, s:slim(x.s)}; jset("charge", charge); paintChargePill(); $("gPlug").textContent = "Suivi lancé ✓"; };
-    $("gNext").onclick = () => { G.targets.shift(); G.legs.shift(); G.idx = 0; G.off = 0; G.spoken = new Set(); G.paused = false; $("gCard").hidden = true; drawGuide(); say("C'est reparti."); };
+      charge = {start:Date.now(), from:+$("cFrom").value, to:x.chargeTo, s:slim(x.s)}; jset("charge", charge); paintChargePill(); $("gPlug").textContent = "Suivi lancé ✓";
+      $("gPlug").insertAdjacentHTML("afterend", `<a class="act glink" href="${icsURL(charge)}" download="fin-recharge.ics">📅 Alerte de fin</a>`); };
+    $("gNext").onclick = () => { G.targets.shift(); G.legs.shift(); G.idx = 0; G.off = 0; G.spoken = new Set(); G.paused = false; G.socBase = x.chargeTo; G.driven = 0; G.lowWarned = false;
+      $("gCard").hidden = true; drawGuide(); say("C'est reparti."); };
   } else {
     say("Vous êtes arrivé à destination.");
     $("gCard").innerHTML = `<b>⚑ Arrivé : ${esc(t.label)}</b><div class="acts"><button type="button" class="act wide" id="gEnd">Terminer</button></div>`;
@@ -1138,6 +1186,9 @@ function onGuidePos(pos){
   // Direction : celle de la route devant nous (stable), sinon celle donnée par le GPS quand on roule.
   // À l'arrêt ou au pas, c'est la boussole du téléphone qui oriente la carte.
   G.lastP = p; G.moving = (pos.coords.speed || 0) > 2;
+  // Kilomètres réellement roulés (pour la batterie en direct et le carnet) : on ignore les petits sauts du GPS.
+  if (G.prev){ const d = hav(G.prev, p); if (d > 0.015 && d < 0.6){ G.driven += d; G.total += d; G.prev = p; } else if (d >= 0.6) G.prev = p; } else G.prev = p;
+  setNight(isNight(p));
   let hd = null;
   if (!G.paused && s.d <= 0.05 && (G.moving || compass == null)) hd = bearingDeg(pointAt(leg, s.along), pointAt(leg, Math.min(total, s.along + 0.04)));
   if (hd == null && !G.moving) hd = compass;
@@ -1164,8 +1215,12 @@ function onGuidePos(pos){
   }
   const rem = (total - s.along) + G.legs.slice(1).reduce((a, l) => a + l.cum[l.cum.length - 1], 0);
   const chargeLeft = G.targets.filter(t => t.stop).reduce((a, t) => a + t.stop.minutes, 0);
-  $("gEta").textContent = fmtClock(Date.now() + (rem / 36 * 60 + chargeLeft) * 6e4, Date.now());
-  $("gRem").textContent = fmtDist(rem) + (G.targets[0].stop ? " · borne dans " + fmtDist(total - s.along) : "");
+  G.eta = Date.now() + (rem / 36 * 60 + chargeLeft) * 6e4;
+  $("gEta").textContent = fmtClock(G.eta, Date.now());
+  // Batterie en direct : batterie de départ moins ce qui a été roulé ; estimation à l'arrivée de l'étape.
+  const soc = Math.max(0, G.socBase - G.driven * G.pctKm), atTarget = soc - (total - s.along) * G.pctKm;
+  $("gRem").innerHTML = esc(fmtDist(rem) + (G.targets[0].stop ? " · borne dans " + fmtDist(total - s.along) : "")) + ` · <em class="g-bat${atTarget < cfg.reserve ? " low" : ""}">🔋 ${Math.round(soc)} %</em>`;
+  if (!G.lowWarned && atTarget < (G.targets[0].stop ? 2 : Math.max(3, cfg.reserve - 5))){ G.lowWarned = true; lowBattery(p, soc); }
 }
 /* Carte orientée dans le sens de la route (comme Plans ou Waze), ou nord en haut au choix. */
 let gNorthUp = store.get("gNorthUp") === "1";
@@ -1196,18 +1251,198 @@ function updateView(p, hd, quick){
 function paintNorth(){ $("gNorth").hidden = !canRotate; $("gNorth").textContent = gNorthUp ? "N↑" : "🧭"; $("gNorth").setAttribute("aria-label", gNorthUp ? "Carte nord en haut" : "Carte dans le sens de la route"); }
 $("gNorth").onclick = () => { gNorthUp = !gNorthUp; store.set("gNorthUp", gNorthUp ? "1" : "0"); paintNorth(); if (G && gMe){ const ll = gMe.getLatLng(); updateView({lat:ll.lat, lng:ll.lng}, null); } };
 $("gStop").onclick = stopGuide;
+$("gShare").onclick = () => { if (G) shareETA(G.eta || Date.now(), G.targets[G.targets.length - 1].label); };
 $("gMute").onclick = () => { gMuted = !gMuted; store.set("gMuted", gMuted ? "1" : "0"); $("gMute").textContent = gMuted ? "🔇" : "🔊"; if (gMuted) try { speechSynthesis.cancel(); } catch(e) {} };
 $("gMute").textContent = gMuted ? "🔇" : "🔊";
 map.on("dragstart", () => { if (G){ G.follow = false; $("gRecenter").hidden = false; } });
 $("gRecenter").onclick = () => { if (!G) return; G.follow = true; $("gRecenter").hidden = true; if (gMe){ map.setZoom(17, {animate:false}); const ll = gMe.getLatLng(); updateView({lat:ll.lat, lng:ll.lng}, null); } };
 
+/* ---------- Batterie faible pendant le guidage : on propose la borne la plus proche ---------- */
+async function lowBattery(p, soc){
+  say("Attention, batterie faible. Je cherche une borne proche.");
+  try { const cells = cellsFor({s:p.lat - 0.08, n:p.lat + 0.08, w:p.lng - 0.12, e:p.lng + 0.12});
+    await Promise.race([Promise.allSettled(cells.map(([i, j]) => getCell(i, j).then(l => l && addStations(l)))), sleep(8000)]); } catch(e) {}
+  if (!G) return;
+  const near = [...all.values()].filter(s => compatible(s) && noteOf(s).status !== "ko").map(s => ({s, d:hav(p, s)})).sort((a, b) => a.d - b.d)[0];
+  $("gCard").hidden = false;
+  if (!near){
+    $("gCard").innerHTML = `<b>🔋 Batterie juste : ${Math.round(soc)} %</b><div class="m">Vous risquez d'arriver sous la réserve, et aucune borne n'est connue à proximité.</div><div class="acts"><button type="button" class="act wide" id="gLowOk">OK</button></div>`;
+    $("gLowOk").onclick = () => { $("gCard").hidden = true; }; return;
+  }
+  const far = near.d * 1.3 > soc / G.pctKm;
+  say("Une borne est à " + fmtKm(near.d) + ".");
+  $("gCard").innerHTML = `<b>🔋 Batterie juste : ${Math.round(soc)} %</b><div class="m">Borne la plus proche : <b>${esc(near.s.name)}</b>, à ${fmtKm(near.d)} à vol d'oiseau${far ? " (peut-être trop loin)" : ""}.</div>
+    <div class="acts"><button type="button" class="act plug" id="gLowGo">⚡ Y aller</button><button type="button" class="act" id="gLowNo">Continuer</button></div>`;
+  $("gLowNo").onclick = () => { $("gCard").hidden = true; };
+  $("gLowGo").onclick = async () => {
+    if (!G) return;
+    const cur = Math.max(0, G.socBase - G.driven * G.pctKm);
+    G.targets.unshift({lat:near.s.lat, lng:near.s.lng, label:near.s.name, stop:{s:near.s, chargeTo:cfg.target, minutes:Math.max(0, cfg.target - cur) / 100 * cfg.full, arrive:cur}});
+    $("gCard").hidden = true;
+    if (!(await reroute(G.lastP || p, true)) && G){ G.targets.shift(); $("gIns").textContent = "Pas de réseau : impossible de calculer la route vers la borne."; }
+  };
+}
+
+/* ---------- Nuit : carte sombre pendant le guidage, selon le coucher du soleil là où vous êtes ---------- */
+function sunAlt(lat, lng, t = Date.now()){
+  const r = Math.PI / 180, d = (t - 946728000000) / 864e5;
+  const g = (357.529 + 0.98560028 * d) * r, q = 280.459 + 0.98564736 * d;
+  const L = (q + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * r, e = (23.439 - 0.00000036 * d) * r;
+  const ra = Math.atan2(Math.cos(e) * Math.sin(L), Math.cos(L)), dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const gmst = ((18.697374558 + 24.06570982441908 * d) % 24) * 15, ha = (gmst + lng) * r - ra;
+  return Math.asin(Math.sin(lat * r) * Math.sin(dec) + Math.cos(lat * r) * Math.cos(dec) * Math.cos(ha)) / r;
+}
+const isNight = p => sunAlt(p.lat, p.lng) < -3;
+const routeCol = () => document.body.classList.contains("night") ? "#5aa2f0" : COL.route;
+function setNight(on){
+  if (document.body.classList.contains("night") === on) return;
+  document.body.classList.toggle("night", on);
+  gLayer.eachLayer(l => l.setStyle && l.setStyle({color:routeCol()}));
+}
+
+/* ---------- Envoyer mon heure d'arrivée (SMS, WhatsApp…) ---------- */
+function shareETA(t, dest){
+  const txt = "J'arrive vers " + fmtClock(t, Date.now()).replace(":", " h ") + (dest && dest !== "Ma position" ? " (" + dest.split(/\s\d{5}\s?/)[0] + ")" : "") + ".";
+  if (navigator.share) navigator.share({text:txt}).catch(() => {});
+  else location.href = "sms:&body=" + encodeURIComponent(txt);
+}
+
+/* ---------- Alerte de fin de recharge dans le Calendrier de l'iPhone ---------- */
+function icsURL(c){
+  const st = chargeState(c), z = d => new Date(d).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const name = c.s ? String(c.s.name).replace(/[,;\\\n]/g, " ") : "";
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Bornes Twizy//FR", "BEGIN:VEVENT", "UID:twizy-" + c.start + "@bornes-twizy", "DTSTAMP:" + z(Date.now()),
+    "DTSTART:" + z(st.end), "DTEND:" + z(st.end + 10 * 6e4), "SUMMARY:⚡ Twizy chargée à " + c.to + " %", name ? "LOCATION:" + name : "",
+    "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:Twizy chargée à " + c.to + " %", "TRIGGER:PT0M", "END:VALARM", "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+  return "data:text/calendar;charset=utf-8," + encodeURIComponent(ics);
+}
+
+/* ---------- Carnet de bord : trajets et recharges, totaux par mois ---------- */
+let logBook = jget("log", []);
+function addLog(e){ logBook.unshift(Object.assign({t:Date.now()}, e)); logBook = logBook.slice(0, 500); jset("log", logBook); if (mode === "log" && pane === "log") renderLog(); }
+function logCharge(c, toPct){
+  const pct = toPct - c.from; if (pct < 1) return;
+  const cost = c.s ? costOf(c.s, pct) : {eur:kwhFor(pct) * cfg.priceDef, est:true};
+  addLog({type:"charge", kwh:+kwhFor(pct).toFixed(2), eur:+cost.eur.toFixed(2), est:cost.est, name:c.s ? c.s.name : "", from:c.from, to:Math.round(toPct)});
+}
+const eurTxt = v => v.toFixed(2).replace(".", ",") + " €";
+function renderLog(){
+  const months = new Map();
+  let km = 0, eur = 0;
+  for (const e of logBook){
+    const d = new Date(e.t), k = d.getFullYear() + "-" + d.getMonth();
+    if (!months.has(k)) months.set(k, {d, km:0, trips:0, charges:0, kwh:0, eur:0});
+    const m = months.get(k);
+    if (e.type === "trip"){ m.km += e.km; m.trips++; km += e.km; } else { m.charges++; m.kwh += e.kwh; m.eur += e.eur; eur += e.eur; }
+  }
+  $("hTitle").textContent = "Carnet de bord";
+  $("hSub").textContent = logBook.length ? "Total : " + Math.round(km) + " km · " + eurTxt(eur) + " de recharge" : "Vos trajets et recharges";
+  const day = t => new Date(t).toLocaleDateString("fr-FR", {weekday:"short", day:"numeric", month:"short"});
+  let html = `<form class="logadd" id="logAdd"><input id="logKm" type="number" inputmode="decimal" min="0.1" step="0.1" placeholder="Km d'un trajet fait sans l'appli"><button type="submit" class="act">+ Ajouter</button></form>`;
+  if (!logBook.length) html += `<div class="empty">Rien pour l'instant. Les trajets guidés et les recharges suivies s'ajoutent tout seuls ici.</div>`;
+  months.forEach(m => {
+    html += `<div class="logm"><div class="logm-h">${m.d.toLocaleDateString("fr-FR", {month:"long", year:"numeric"})}</div><div class="summary">
+      <div><b>${Math.round(m.km)}</b><span>km</span></div><div><b>${m.trips}</b><span>trajet${m.trips > 1 ? "s" : ""}</span></div>
+      <div><b>${m.kwh.toFixed(1).replace(".", ",")}</b><span>kWh</span></div><div><b>${eurTxt(m.eur).replace(" €", "")} €</b><span>recharges</span></div></div>
+      ${m.km > 0 && m.eur > 0 ? `<div class="note" style="margin-top:0">≈ ${eurTxt(m.eur / m.km * 100)} pour 100 km</div>` : ""}</div>`;
+  });
+  html += `<ul class="list loglist">` + logBook.slice(0, 80).map((e, i) => e.type === "trip"
+    ? `<li data-i="${i}"><span class="logi">🚗</span><div class="n">${fmtKm(e.km)}${e.to ? " · " + esc(String(e.to).split(/\s\d{5}\s?/)[0]) : ""}<div class="s">${day(e.t)}${e.guided ? " · guidé" : ""}</div></div><button type="button" class="logdel" aria-label="Supprimer">×</button></li>`
+    : `<li data-i="${i}"><span class="logi">⚡</span><div class="n">${esc(e.name || "Recharge")}<div class="s">${day(e.t)} · ${e.from} → ${e.to} % · ${String(e.kwh).replace(".", ",")} kWh · ${e.est ? "≈ " : ""}${eurTxt(e.eur)}</div></div><button type="button" class="logdel" aria-label="Supprimer">×</button></li>`).join("") + "</ul>";
+  $("paneLog").innerHTML = html;
+  $("logAdd").onsubmit = ev => { ev.preventDefault(); const v = parseFloat(String($("logKm").value).replace(",", ".")); if (v > 0){ addLog({type:"trip", km:Math.round(v * 10) / 10}); renderLog(); } };
+  $("paneLog").querySelectorAll(".logdel").forEach(b => b.onclick = () => { logBook.splice(+b.closest("li").dataset.i, 1); jset("log", logBook); renderLog(); });
+}
+
+/* ---------- Rouler sans réseau : guidage et morceaux de carte du trajet gardés sur le téléphone ---------- */
+const OFF_CACHE = "twizy-v1-off";
+function lonLatTile(p, z){ const n = 2 ** z, r = p.lat * Math.PI / 180;
+  return [Math.floor((p.lng + 180) / 360 * n), Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n)]; }
+function tilesAlong(pts){
+  const want = new Set(), pads = {12:0, 13:1, 14:1, 15:1, 16:2, 17:1};
+  for (const z in pads){ const pad = pads[z]; let last = "";
+    for (const p of pts){ const [x, y] = lonLatTile(p, +z), k = x + "_" + y; if (k === last) continue; last = k;
+      for (let i = -pad; i <= pad; i++) for (let j = -pad; j <= pad; j++) want.add(z + "/" + (x + i) + "/" + (y + j)); } }
+  return [...want];
+}
+async function saveOffline(btn){
+  if (!lastTrip) return;
+  const t = lastTrip, label = x => { btn.textContent = x; };
+  btn.disabled = true;
+  try {
+    label("Calcul du guidage…");
+    t.legs = await guideRoute(t.a, t.stops.map(x => ({lat:x.s.lat, lng:x.s.lng})).concat([{lat:t.b.lat, lng:t.b.lng}]));
+    let bad = 0;
+    if ("caches" in window){
+      const list = tilesAlong(t.legs.flatMap(l => l.pts)), c = await caches.open(OFF_CACHE), queue = list.slice(); let done = 0;
+      const worker = async () => { while (queue.length){ const [z, x, y] = queue.shift().split("/"), u = tileURL(z, x, y);
+        try { if (!(await c.match(u))){ const r = await fetch(u, {mode:"cors", credentials:"omit"}); if (r.ok) await c.put(u, r); else bad++; } } catch(e){ bad++; }
+        if (++done % 10 === 0) label("Carte enregistrée… " + Math.round(done / list.length * 100) + " %"); } };
+      await Promise.all(Array.from({length:6}, worker));
+      try { const keys = await c.keys(); if (keys.length > 6000) for (const k of keys.slice(0, keys.length - 4500)) await c.delete(k); } catch(e) {}
+    }
+    const keep = {t:Date.now(), a:t.a, b:t.b, km:t.km, range:t.range, climbF:t.climbF, arrT:t.arrT, pts:t.pts.filter((_, i) => i % 2 === 0 || i === t.pts.length - 1),
+      stops:t.stops.map(x => ({s:slim(x.s), km:x.s.km, chargeTo:x.chargeTo, minutes:x.minutes, arrive:x.arrive})),
+      legs:t.legs.map(l => ({pts:l.pts.map(p => [+p.lat.toFixed(6), +p.lng.toFixed(6)]), man:l.man.map(m => ({type:m.type, instruction:m.instruction,
+        verbal_transition_alert_instruction:m.verbal_transition_alert_instruction, verbal_pre_transition_instruction:m.verbal_pre_transition_instruction, begin_shape_index:m.begin_shape_index}))}))};
+    if (!jset("offTrip", keep)){ pruneCache(); jset("offTrip", keep); }
+    paintOffBox();
+    label(bad ? "Enregistré ✓ (" + bad + " morceaux de carte manquants)" : "Enregistré ✓ · guidage possible sans réseau");
+  } catch(e){ label("Échec : " + e.message); btn.disabled = false; }
+}
+function restoreOff(o){
+  const legs = o.legs.map(l => { const pts = l.pts.map(([lat, lng]) => ({lat, lng})), cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + hav(pts[i - 1], pts[i]));
+    return {pts, cum, man:l.man}; });
+  return {a:o.a, b:o.b, km:o.km, range:o.range, climbF:o.climbF, arrT:o.arrT, pts:o.pts, legs,
+    stops:o.stops.map(x => Object.assign({}, x, {s:Object.assign({}, x.s, {km:x.km})}))};
+}
+function paintOffBox(){
+  const o = jget("offTrip", null), box = $("offBox");
+  if (!o || Date.now() - o.t > 14 * 864e5){ box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<div><b>📥 Trajet enregistré</b><div class="m">Vers ${esc(o.b.label.split(/\s\d{5}\s?/)[0])} · utilisable sans réseau</div></div><button type="button" class="act plug" id="offGo">▶ Guider</button>`;
+  $("offGo").onclick = () => { lastTrip = restoreOff(jget("offTrip", o)); startGuide(); };
+}
+
+/* ---------- Zone atteignable avec la batterie actuelle ---------- */
+const zoneLayer = L.layerGroup().addTo(map);
+let zoneOn = false, zoneMsg = "";
+async function toggleZone(){
+  if (zoneOn){ zoneOn = false; zoneMsg = ""; zoneLayer.clearLayers(); $("fZone").setAttribute("aria-pressed", false); renderList(); return; }
+  zoneOn = true; $("fZone").setAttribute("aria-pressed", true); setLoading(true); $("hSub").textContent = "Calcul de la zone atteignable…";
+  try {
+    let c; try { c = await getPos(); } catch(e){ c = map.getCenter(); }
+    let range = cfg.range;
+    if (cfg.wx) try { range = Math.round(cfg.range * wxFactor(await tempAt(c.lat, c.lng, Date.now()))); } catch(e) {}
+    const km = Math.max(1, (cfg.soc - cfg.reserve) / 100 * range);
+    const body = {locations:[{lat:c.lat, lon:c.lng}], costing:"motor_scooter", costing_options:{motor_scooter:{top_speed:45, use_highways:0, use_primary:0.2, use_hills:0.3}},
+      contours:[{distance:+km.toFixed(1)}, {distance:+(km / 2).toFixed(1)}], polygons:true, generalize:100};
+    let gj = null;
+    for (const u of VALHALLA.map(x => x.replace(/\/route$/, "/isochrone"))){
+      try { const r = await fetch(u + "?json=" + encodeURIComponent(JSON.stringify(body))); if (r.ok){ gj = await r.json(); if (gj.features && gj.features.length) break; } } catch(e) {}
+    }
+    if (!gj || !gj.features || !gj.features.length) throw new Error("Zone indisponible pour le moment, réessayez.");
+    if (!zoneOn) return;
+    zoneLayer.clearLayers();
+    gj.features.sort((a, b) => b.properties.contour - a.properties.contour).forEach((f, i) =>
+      L.geoJSON(f, {interactive:false, style:{renderer, color:i ? "#1e8a52" : "#2f7fd6", weight:2.5, fillOpacity:i ? .16 : .1}}).addTo(zoneLayer));
+    zoneMsg = `Avec ${cfg.soc} % : bleu = aller simple (${Math.round(km)} km), vert = aller-retour`;
+    map.fitBounds(L.geoJSON(gj.features[0]).getBounds(), {paddingTopLeft:[16, hdrH + 16], paddingBottomRight:[16, curVis + 16]});
+    $("hSub").textContent = zoneMsg;
+  } catch(e){ zoneOn = false; $("fZone").setAttribute("aria-pressed", false); $("hSub").textContent = e.message; }
+  finally { setLoading(busy()); }
+}
+$("fZone").onclick = toggleZone;
+
 /* ---------- Onglets ---------- */
 function setMode(m){
   if (detail){ detail = null; selLayer.clearLayers(); }
   mode = m;
-  $("tabMap").setAttribute("aria-selected", m === "map"); $("tabTrip").setAttribute("aria-selected", m === "trip");
+  $("tabMap").setAttribute("aria-selected", m === "map"); $("tabTrip").setAttribute("aria-selected", m === "trip"); $("tabLog").setAttribute("aria-selected", m === "log");
   $("mapBar").hidden = m !== "map";
   if (m === "map"){ tripLayer.remove(); nearLayer.addTo(map); showPane("map"); loadNear(); setSnap(snapName === "full" ? "half" : snapName); }
+  else if (m === "log"){ tripLayer.remove(); nearLayer.addTo(map); showPane("log"); renderLog(); setSnap("full"); }
   else {
     nearLayer.remove(); tripLayer.addTo(map); showPane("trip");
     if ($("tripResult").hidden){ showForm(); setSnap("full"); } else { restoreTripHead(); setSnap("half"); }
@@ -1215,6 +1450,7 @@ function setMode(m){
 }
 $("tabMap").onclick = () => mode !== "map" && setMode("map");
 $("tabTrip").onclick = () => mode !== "trip" && setMode("trip");
+$("tabLog").onclick = () => mode !== "log" && setMode("log");
 
 /* ---------- Logo de l'appli (dessiné ici : fond dégradé, épingle blanche, éclair jaune) ---------- */
 function drawLogo(px){
@@ -1232,8 +1468,12 @@ function drawLogo(px){
 try { $("touchIcon").href = drawLogo(180); $("favIcon").href = drawLogo(64); } catch(e) {}
 
 /* ---------- Nouveautés : l'appli se souvient de la dernière version vue et montre ce qui a changé ---------- */
-const VERSION = 18;
+const VERSION = 19;
 const CHANGELOG = [
+  [19, "9 nov.", ["Nouvelle carte : Plan IGN, plus lisible", "Batterie en direct pendant le guidage, avec une borne proposée si elle devient juste",
+    "Zone atteignable avec votre batterie (bouton ◎ sur la carte)", "Carnet de bord : km, recharges et € par mois (onglet Carnet)",
+    "Les côtes du trajet comptent dans l'autonomie", "Alerte de fin de recharge dans le Calendrier",
+    "Envoyer mon heure d'arrivée par SMS", "Carte sombre la nuit pendant le guidage", "Trajet enregistré pour rouler sans réseau"]],
   [18, "8 nov.", ["Nouveau logo de l'appli", "Cet écran des nouveautés (touchez le numéro de version pour le revoir)"]],
   [17, "8 nov.", ["Rotation de la carte beaucoup plus fluide"]],
   [16, "8 nov.", ["La carte suit la boussole du téléphone : 2e toucher sur le bouton de position"]],
@@ -1262,6 +1502,7 @@ document.querySelector(".ver") && (document.querySelector(".ver").onclick = () =
 /* ---------- Démarrage ---------- */
 paintFilters();
 paintChargePill();
+paintOffBox();
 showPane("map");
 setSnap("peek");
 syncMarkers(true);
