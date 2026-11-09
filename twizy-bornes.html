@@ -12,6 +12,7 @@
 <link rel="apple-touch-icon" id="touchIcon" href="">
 <link rel="icon" id="favIcon" type="image/png" href="">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&display=swap">
 <style>
 /* Carte plein écran ; en-tête bleu nuit compact ; panneau bas glissable (aperçu / moitié / plein) */
@@ -30,8 +31,8 @@ html,body{height:100%;margin:0;overscroll-behavior:none}
 body{font:15px/1.4 var(--f-body);background:var(--bg);color:var(--fg);overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 button,a,.chip,.list li{touch-action:manipulation}
 button{font:600 15px var(--f-body);border:0;border-radius:12px;cursor:pointer;color:inherit;background:none}
-#map{position:fixed;inset:0;background:#f2efe9}
-@media (prefers-color-scheme: dark){#map{background:#1b1f27}.leaflet-tile-pane{filter:invert(.92) hue-rotate(180deg) brightness(1.15) contrast(.8) saturate(.5)}}
+#map{position:fixed;inset:0;background:#f8f4f0}
+@media (prefers-color-scheme: dark){#map{background:#45516e}}
 .leaflet-container{background:transparent;font-family:var(--f-body)}
 .leaflet-top{top:calc(var(--hdr) + 4px)}
 .leaflet-control-attribution{font-size:10px;opacity:.75}
@@ -223,8 +224,11 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 .g-bat{font-style:normal;font-weight:700;color:var(--ok);white-space:nowrap}
 .g-bat.low{color:#e11d48}
 body.night{--bg:#0e1522;--card:#172234;--fg:#e8edf5;--muted:#93a1b6;--line:#2a3850;--field:#0f1828;--ok:#3fbf7d;color-scheme:dark}
-body.night #map{background:#1b1f27}
-body.night .leaflet-tile-pane{filter:invert(.92) hue-rotate(180deg) brightness(1.15) contrast(.8) saturate(.5)}
+body.night #map{background:#45516e}
+#glmap{position:fixed;inset:0;z-index:0;background:#f8f4f0}
+body.gl #map{background:transparent;z-index:1}
+@media (prefers-color-scheme: dark){#glmap{background:#45516e}}
+#glmap canvas{outline:none}
 .g-row .g-btn{padding:0 13px}
 .logadd{display:flex;gap:8px;margin:2px 0 14px}
 .logadd input{flex:1;background:var(--field);color:var(--fg);border:1px solid var(--line)}
@@ -251,7 +255,7 @@ body.night .leaflet-tile-pane{filter:invert(.92) hue-rotate(180deg) brightness(1
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 19 · 9 nov. 19 h 30</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 20 · 9 nov. 20 h 15</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
@@ -426,9 +430,10 @@ body.night .leaflet-tile-pane{filter:invert(.92) hue-rotate(180deg) brightness(1
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=19"></script>
+<script src="app.js?v=20"></script>
 
 </body>
 </html>
