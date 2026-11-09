@@ -5,10 +5,10 @@
   const LIB = "https://tiles.openfreemap.org/styles/liberty";
   const ours = s => typeof s === "string" && /openfreemap\.org\/styles\//.test(s);
   const nightURL = s => typeof s === "string" && /\/styles\/(fiord|dark)/.test(s);
-  const DAY = {bg:"#f8f4ec", res:"#f4f0e8", build:"#ebe7e0", buildL:"#e2ded6", water:"#8fcbf2", park:"#c2e7b0", wood:"#b8dfa4", minor:"#ffffff", major:"#fdd876",
-    second:"#fff3c4", path:"#e6e1d8", casing:"#e2ddd3", text:"#4a4f57", waterText:"#3c7fb8", halo:"#ffffff", rail:"#d2cec6", border:"#c9c3b8"};
-  const NIGHT = {bg:"#1f2329", res:"#23272e", build:"#2c3139", buildL:"#353b44", water:"#1d3b57", park:"#203a2c", wood:"#1e3628", minor:"#3a4049", major:"#8c6d2e",
-    second:"#5a606a", path:"#353b44", casing:"#1f2329", text:"#c9ced6", waterText:"#6fa3cf", halo:"#1f2329", rail:"#3a4049", border:"#4a4f57"};
+  const DAY = {bg:"#f8f4ec", res:"#f4f0e8", build:"#ebe7e0", buildL:"#e2ded6", water:"#8fcbf2", park:"#c2e7b0", wood:"#b8dfa4", minor:"#ffffff", major:"#ffffff",
+    second:"#ffffff", path:"#e6e1d8", casing:"#d6d0c4", text:"#4a4f57", waterText:"#3c7fb8", halo:"#ffffff", rail:"#d2cec6", border:"#c9c3b8"};
+  const NIGHT = {bg:"#1f2329", res:"#23272e", build:"#2c3139", buildL:"#353b44", water:"#1d3b57", park:"#203a2c", wood:"#1e3628", minor:"#3a4049", major:"#5f6670",
+    second:"#4c535d", path:"#353b44", casing:"#1f2329", text:"#c9ced6", waterText:"#6fa3cf", halo:"#1f2329", rail:"#3a4049", border:"#4a4f57"};
   function paint(m, night){
     const C = night ? NIGHT : DAY, st = m.getStyle(); if (!st || !st.layers) return false;
     const set = (id, p, v) => { try { m.setPaintProperty(id, p, v); } catch(e) {} };
