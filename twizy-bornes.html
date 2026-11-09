@@ -30,8 +30,8 @@ html,body{height:100%;margin:0;overscroll-behavior:none}
 body{font:15px/1.4 var(--f-body);background:var(--bg);color:var(--fg);overflow:hidden;-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 button,a,.chip,.list li{touch-action:manipulation}
 button{font:600 15px var(--f-body);border:0;border-radius:12px;cursor:pointer;color:inherit;background:none}
-#map{position:fixed;inset:0;background:#e9e6e1}
-@media (prefers-color-scheme: dark){#map{background:#1b1f27}.leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.88)}}
+#map{position:fixed;inset:0;background:#f2efe9}
+@media (prefers-color-scheme: dark){#map{background:#1b1f27}.leaflet-tile-pane{filter:invert(.92) hue-rotate(180deg) brightness(1.15) contrast(.8) saturate(.5)}}
 .leaflet-container{background:transparent;font-family:var(--f-body)}
 .leaflet-top{top:calc(var(--hdr) + 4px)}
 .leaflet-control-attribution{font-size:10px;opacity:.75}
@@ -47,7 +47,7 @@ button{font:600 15px var(--f-body);border:0;border-radius:12px;cursor:pointer;co
 .tabs button[aria-selected="true"]{background:#fff;color:var(--night)}
 #mapBar{display:flex;flex-direction:column;gap:9px}
 .row{display:flex;gap:8px;position:relative}
-input[type=search],input[type=time],input[type=text]{width:100%;min-width:0;border:0;border-radius:12px;padding:0 14px;height:46px;font:inherit;font-size:16px;background:#fff;color:#172033;-webkit-appearance:none;appearance:none}
+input[type=search],input[type=time],input[type=text],input[type=number]{width:100%;min-width:0;border:0;border-radius:12px;padding:0 14px;height:46px;font:inherit;font-size:16px;background:#fff;color:#172033;-webkit-appearance:none;appearance:none}
 .chips{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;margin:0 -12px;padding:0 12px}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex:none;background:rgba(255,255,255,.14);color:#fff;height:38px;padding:0 14px;border-radius:999px;font-size:14px;font-weight:600;display:flex;align-items:center;gap:7px;white-space:nowrap}
@@ -219,6 +219,30 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 .news-v span{color:var(--muted);font-size:13px}
 .news-v ul{margin:4px 0 0;padding-left:20px}
 .news-v li{margin:2px 0}
+/* Version 19 */
+.g-bat{font-style:normal;font-weight:700;color:var(--ok);white-space:nowrap}
+.g-bat.low{color:#e11d48}
+body.night{--bg:#0e1522;--card:#172234;--fg:#e8edf5;--muted:#93a1b6;--line:#2a3850;--field:#0f1828;--ok:#3fbf7d;color-scheme:dark}
+body.night #map{background:#1b1f27}
+body.night .leaflet-tile-pane{filter:invert(.92) hue-rotate(180deg) brightness(1.15) contrast(.8) saturate(.5)}
+.g-row .g-btn{padding:0 13px}
+.logadd{display:flex;gap:8px;margin:2px 0 14px}
+.logadd input{flex:1;background:var(--field);color:var(--fg);border:1px solid var(--line)}
+.logadd .act{flex:none;padding:0 16px;height:46px}
+.logm{margin-bottom:10px}
+.logm-h{font:700 18px var(--f-display);letter-spacing:.02em;margin:4px 0 6px}
+.logm-h::first-letter{text-transform:uppercase}
+.logi{font-size:22px;width:30px;text-align:center;flex:none}
+.logdel{flex:none;width:40px;height:40px;border-radius:50%;background:var(--field);font-size:20px;color:var(--muted)}
+.loglist li{cursor:default}
+.loglist .s{white-space:normal}
+.brand h1{white-space:nowrap}
+.offbox{display:flex;gap:10px;align-items:center;justify-content:space-between;background:var(--field);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.offbox .m{font-size:13px;color:var(--muted)}
+.offbox .act{flex:none;padding:0 16px}
+#gCard .act.glink{display:flex;align-items:center;justify-content:center;text-decoration:none;color:var(--fg)}
+@media (max-width:400px){.brand h1{font-size:19px}.tabs button{padding:0 10px;font-size:14px}}
+@media (max-width:360px){.brand h1{font-size:17px}.tabs button{padding:0 8px}}
 @media (prefers-reduced-motion:reduce){.sheet,.fab{transition:none}.spin{animation-duration:2s}}
 </style>
 </head>
@@ -227,10 +251,11 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 
 <header class="top" id="top">
   <div class="brand">
-    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 18 · 8 nov. 22 h 45</div></div>
+    <div><h1>Bornes Twizy 45</h1><div class="ver">Version 19 · 9 nov. 19 h 30</div></div>
     <div class="tabs" role="tablist">
       <button type="button" role="tab" id="tabMap" aria-selected="true">Carte</button>
       <button type="button" role="tab" id="tabTrip" aria-selected="false">Trajet</button>
+      <button type="button" role="tab" id="tabLog" aria-selected="false">Carnet</button>
     </div>
   </div>
   <div id="mapBar">
@@ -239,6 +264,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
       <ul class="sugg" id="qSugg" hidden></ul>
     </form>
     <div class="chips">
+      <button type="button" class="chip" id="fZone" aria-pressed="false">◎ Zone atteignable</button>
       <button type="button" class="chip" id="fT2" aria-pressed="false"><i class="dot" style="background:var(--t2)"></i>Type 2</button>
       <button type="button" class="chip" id="fFree" aria-pressed="false">Gratuites</button>
       <button type="button" class="chip" id="f24" aria-pressed="false">24 h/24</button>
@@ -264,6 +290,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
     <div class="g-row">
       <div class="g-info"><b id="gEta">--:--</b><span id="gRem">arrivée estimée</span></div>
       <button type="button" class="g-btn" id="gNorth" aria-label="Orientation de la carte">🧭</button>
+      <button type="button" class="g-btn" id="gShare" aria-label="Envoyer mon heure d'arrivée">💬</button>
       <button type="button" class="g-btn" id="gMute" aria-label="Couper ou remettre la voix">🔊</button>
       <button type="button" class="g-btn stop" id="gStop">Arrêter</button>
     </div>
@@ -281,6 +308,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 
   <div class="pane" id="paneTrip" hidden>
     <form class="form" id="tripForm">
+      <div class="offbox" id="offBox" hidden></div>
       <div class="route-fields">
         <div class="field">
           <label for="from">Départ</label>
@@ -367,6 +395,8 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 
   <div class="pane" id="paneDetail" hidden></div>
 
+  <div class="pane" id="paneLog" hidden></div>
+
   <div class="pane" id="paneCharge" hidden>
     <div class="form">
       <div id="cSetup" class="form">
@@ -387,6 +417,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
       </div>
       <div id="cInfo"></div>
       <button type="button" class="primary" id="cGo">Démarrer le suivi</button>
+      <a class="ghost glink" id="cCal" download="fin-recharge.ics" hidden>📅 M'alerter à la fin (Calendrier)</a>
       <button type="button" class="ghost" id="cStop" hidden>Arrêter le suivi</button>
       <div class="note">Estimation à partir de la durée d'une charge complète réglée dans « Réglages de ma Twizy ». Le suivi continue même si vous fermez l'appli.</div>
     </div>
@@ -397,7 +428,7 @@ body.guiding .top,body.guiding .sheet,body.guiding .fab,body.guiding .cpill{disp
 <script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js"></script>
 <script>/* Clé Open Charge Map intégrée (3ᵉ source de bornes) */
 try { if (!localStorage.getItem("ocmKey")) localStorage.setItem("ocmKey", "4282707b-c1d0-4da4-a10a-cbafda4807f1"); } catch(e) {}</script>
-<script src="app.js?v=18"></script>
+<script src="app.js?v=19"></script>
 
 </body>
 </html>

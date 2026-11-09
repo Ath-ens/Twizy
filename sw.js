@@ -12,7 +12,7 @@ self.addEventListener("fetch", e => {
   const req = e.request;
   if (req.method !== "GET") return;
   const u = new URL(req.url);
-  if (u.hostname.endsWith("basemaps.cartocdn.com") || u.hostname === "tile.openstreetmap.org") { e.respondWith(tile(req)); return; }
+  if (u.hostname === "tile.openstreetmap.org" || (u.hostname === "data.geopf.fr" && u.pathname === "/wmts")) { e.respondWith(tile(req)); return; }
   if (u.hostname === "cdnjs.cloudflare.com" || u.hostname === "cdn.jsdelivr.net" || u.hostname === "fonts.googleapis.com" || u.hostname === "fonts.gstatic.com") { e.respondWith(cacheFirst(req)); return; }
   if (u.origin === self.location.origin) { e.respondWith(networkFirst(req)); return; }
 });
@@ -31,6 +31,9 @@ async function tile(req) {
   const c = await caches.open(V + "-tiles");
   const hit = await c.match(req.url);
   if (hit) return hit;
+  // Morceaux de carte enregistrés pour rouler sans réseau (bouton « Enregistrer pour rouler sans réseau »).
+  const off = await (await caches.open(V + "-off")).match(req.url);
+  if (off) return off;
   try {
     const res = await fetch(req.url, { mode: "cors", credentials: "omit" });
     if (res.ok) {
