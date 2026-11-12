@@ -80,8 +80,25 @@ function arrivalSoc(t){
   const x = t.stops[t.stops.length - 1];
   return x.chargeTo - (t.km - x.s.km + (x.s.detour || 0)) * pct;
 }
+/* Zoom sur un trajet minuscule (départ = arrivée) : Leaflet calculait un zoom infini et la carte plantait. */
+const fitB = map.fitBounds.bind(map);
+map.fitBounds = (bb, o) => {
+  try { const B = L.latLngBounds(bb);
+    if (!B.isValid()) return map;
+    if (B.getNorthEast().distanceTo(B.getSouthWest()) < 80) return map.setView(B.getCenter(), Math.max(map.getZoom() || 15, 16));
+  } catch(e) { return map; }
+  return fitB(bb, o);
+};
 const goForward = $("tripForm").onsubmit;
 $("tripForm").onsubmit = async e => {
+  // Déjà sur place (ex. bouton Maison alors qu'on est à la maison) : pas de trajet à calculer.
+  const to = $("to");
+  if (to.dataset.lat && !$("from").value.trim()){
+    let here = me; try { if (!here) here = await getPos(); } catch(err) {}
+    if (here && hav(here, {lat:+to.dataset.lat, lng:+to.dataset.lng}) < 0.15){
+      e.preventDefault(); toast("Vous êtes déjà à " + short(to.value) + " 🙂"); return;
+    }
+  }
   const before = lastTrip;
   await goForward(e);
   if (rt.on && lastTrip && lastTrip !== before && $("gGo")) await addReturn(lastTrip);

@@ -1,5 +1,8 @@
 /* Carte « façon Plans » : la carte vectorielle Liberty (OpenFreeMap) recolorée, en version jour et nuit.
    Chargé avant app.js : toute carte OpenFreeMap demandée par l'appli reçoit ce style (nuit si l'appli demande le style sombre). */
+// Réparation : une vue de carte invalide (NaN) enregistrée par un ancien bug empêcherait la carte de s'afficher.
+try { const v = JSON.parse(localStorage.getItem("view") || "null"), ok = n => typeof n === "number" && Number.isFinite(n);
+  if (v && !(ok(v.lat) && ok(v.lng) && ok(v.z))) localStorage.removeItem("view"); } catch(e){ try { localStorage.removeItem("view"); } catch(e2) {} }
 // Ajouts de la version 21 (extras.js) : chargés juste après app.js.
 document.addEventListener("DOMContentLoaded", () => { const x = document.createElement("script"); x.src = "extras.js?v=21"; document.body.appendChild(x); });
 (() => {
