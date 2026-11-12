@@ -1,5 +1,7 @@
 /* Carte « façon Plans » : la carte vectorielle Liberty (OpenFreeMap) recolorée, en version jour et nuit.
    Chargé avant app.js : toute carte OpenFreeMap demandée par l'appli reçoit ce style (nuit si l'appli demande le style sombre). */
+// Ajouts de la version 21 (extras.js) : chargés juste après app.js.
+document.addEventListener("DOMContentLoaded", () => { const x = document.createElement("script"); x.src = "extras.js?v=21"; document.body.appendChild(x); });
 (() => {
   if (!window.maplibregl) return;
   const LIB = "https://tiles.openfreemap.org/styles/liberty";
