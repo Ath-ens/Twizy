@@ -4,7 +4,7 @@
 try { const v = JSON.parse(localStorage.getItem("view") || "null"), ok = n => typeof n === "number" && Number.isFinite(n);
   if (v && !(ok(v.lat) && ok(v.lng) && ok(v.z))) localStorage.removeItem("view"); } catch(e){ try { localStorage.removeItem("view"); } catch(e2) {} }
 // Ajouts de la version 21 (extras.js) : chargés juste après app.js.
-document.addEventListener("DOMContentLoaded", () => { const x = document.createElement("script"); x.src = "extras.js?v=21"; document.body.appendChild(x); });
+document.addEventListener("DOMContentLoaded", () => { const x = document.createElement("script"); x.src = "extras.js?v=22"; document.body.appendChild(x); });
 (() => {
   if (!window.maplibregl) return;
   const LIB = "https://tiles.openfreemap.org/styles/liberty";
